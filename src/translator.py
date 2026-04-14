@@ -47,6 +47,7 @@ from typing import Optional
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from openai import OpenAI  # OpenRouter is OpenAI-compatible
+from openai.types.chat import ChatCompletionMessageParam
 
 from src.glossary_manager import GlossaryManager
 
@@ -213,15 +214,34 @@ def translate_chunk(
     # Fix: add retry with exponential backoff (e.g., tenacity or a simple loop)
     # and meaningful error messages.
 
-    prompt = build_prompt(
-        chunk, source_lang, target_lang, glossary_terms, previous_translated
-    )
+    messages: list[ChatCompletionMessageParam] = [
+        {
+            "role": "system",
+            "content": "You are a professional translator. Translate text from "
+                       f"{source_lang} to {target_lang}.\n"
+                       "Rules:\n"
+                       "  1. Use the mandatory glossary terms exactly as specified.\n"
+                       "  2. Preserve formatting, paragraph breaks, and punctuation.\n"
+                       "  3. Do not add explanations or commentary — output ONLY "
+                       "the translated text.\n"
+                       "  4. Maintain the tone and style of the original.",
+        },
+        {
+            "role": "user",
+            "content": build_prompt(
+                chunk, source_lang, target_lang, glossary_terms, previous_translated
+            ),
+        },
+    ]
     response = client.chat.completions.create(
         model=model,
-        messages=[{"role": "user", "content": prompt}],
+        messages=messages,
         temperature=0.1,  # low temperature = more consistent/literal translation
     )
-    return response.choices[0].message.content.strip()
+    content = response.choices[0].message.content
+    if content is None:
+        raise ValueError("Translation failed: received empty response from API")
+    return content.strip()
 
 
 def stitch_chunks(
