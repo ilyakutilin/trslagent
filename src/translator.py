@@ -33,7 +33,6 @@ Translates large documents using:
 # If someone swaps the model, these prefixes would be wrong.
 # Fix: make prefixes configurable or auto-detect based on model name.
 
-import os
 import re
 import time
 from typing import Optional
@@ -47,20 +46,19 @@ from openai import (
 )
 from openai.types.chat import ChatCompletionMessageParam
 
+from src.config import get_settings
 from src.glossary_manager import GlossaryManager
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
-# TODO: Fix this: OPENROUTER_API_KEY captured at module import time
-# OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "") is evaluated once
-# at import. If the env var is set after import, it won't be picked up.
-# Fix: read it lazily inside get_llm_client().
+settings = get_settings()
 
-OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
-DEFAULT_MODEL = "anthropic/claude-3.5-sonnet"  # change to any OpenRouter model
-CHUNK_SIZE = 6000  # maximum chunk size in characters (splitter works in chars)
-CHUNK_OVERLAP = 600  # overlap between chunks to avoid losing context at seams
-GLOSSARY_TOP_K = 20  # how many glossary terms to retrieve per chunk
+# Legacy constants for backward compatibility (deprecated, use settings object)
+OPENROUTER_API_KEY = settings.llm.api_key
+DEFAULT_MODEL = settings.llm.model
+CHUNK_SIZE = settings.chunking.size
+CHUNK_OVERLAP = settings.chunking.overlap
+GLOSSARY_TOP_K = settings.glossary.top_k
 
 
 # ── OpenRouter client (OpenAI-compatible) ────────────────────────────────────

@@ -22,11 +22,16 @@ import chromadb
 from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
 
+from src.config import get_settings
+
 # ── Configuration ─────────────────────────────────────────────────────────────
 
-EMBEDDING_MODEL = "intfloat/multilingual-e5-large"
-CHROMA_DIR = "./chroma_db"  # where ChromaDB persists data on disk
-COLLECTION_NAME = "glossary"
+settings = get_settings()
+
+# Use centralized settings (can be overridden via environment variables)
+EMBEDDING_MODEL = settings.glossary.embedding_model
+CHROMA_DIR = settings.glossary.chroma_dir
+COLLECTION_NAME = settings.glossary.collection_name
 
 
 # ── Why multilingual-e5-large? ────────────────────────────────────────────────
@@ -124,13 +129,15 @@ class GlossaryManager:
             ids.append(f"fwd_{i}")
             embeddings.append(fwd_embedding)
             documents.append(src)
-            metadatas.append({
-                "source": src,
-                "target": tgt,
-                "direction": "fwd",
-                "canonical_source": canonical_src,
-                "canonical_target": canonical_tgt
-            })
+            metadatas.append(
+                {
+                    "source": src,
+                    "target": tgt,
+                    "direction": "fwd",
+                    "canonical_source": canonical_src,
+                    "canonical_target": canonical_tgt,
+                }
+            )
 
             # Reverse entry (target → source) — same pair, but queryable from target lang
             rev_text = f"passage: {tgt}"
@@ -138,13 +145,15 @@ class GlossaryManager:
             ids.append(f"rev_{i}")
             embeddings.append(rev_embedding)
             documents.append(tgt)
-            metadatas.append({
-                "source": tgt,
-                "target": src,
-                "direction": "rev",
-                "canonical_source": canonical_src,
-                "canonical_target": canonical_tgt
-            })
+            metadatas.append(
+                {
+                    "source": tgt,
+                    "target": src,
+                    "direction": "rev",
+                    "canonical_source": canonical_src,
+                    "canonical_target": canonical_tgt,
+                }
+            )
 
         # Batch upsert (handles duplicates gracefully)
         BATCH = 500
@@ -229,23 +238,25 @@ class GlossaryManager:
             # Normalize direction: always return {source: src_lang, target: tgt_lang}
             # Compare the requested languages with the canonical pair
             canonical_src, canonical_tgt = canonical_pair
-            
+
             # Safely convert to strings for comparison
             src_lang_str = str(source_lang).lower()
             tgt_lang_str = str(target_lang).lower()
             canonical_src_str = str(canonical_src).lower()
             canonical_tgt_str = str(canonical_tgt).lower()
-            
+
             if canonical_src_str == src_lang_str and canonical_tgt_str == tgt_lang_str:
                 # Entry already in correct direction
                 terms.append({"source": meta["source"], "target": meta["target"]})
-            elif canonical_src_str == tgt_lang_str and canonical_tgt_str == src_lang_str:
+            elif (
+                canonical_src_str == tgt_lang_str and canonical_tgt_str == src_lang_str
+            ):
                 # Entry is reversed - swap it
                 terms.append({"source": meta["target"], "target": meta["source"]})
             else:
                 # Shouldn't happen if canonical pairs are consistent, but return as-is
                 terms.append({"source": meta["source"], "target": meta["target"]})
-            
+
             if len(terms) >= top_k:
                 break
 
