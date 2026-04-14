@@ -58,15 +58,8 @@ from src.glossary_manager import GlossaryManager
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 DEFAULT_MODEL = "anthropic/claude-3.5-sonnet"  # change to any OpenRouter model
-# TODO: Fix this: CHUNK_SIZE naming is misleading
-# CHUNK_SIZE = 1500 is described as "tokens" but split_text() multiplies by 4
-# to convert to characters. This 4× ratio is wrong for CJK text (~1–2 chars/token)
-# and many European languages with longer words.
-# Fix: rename to something like CHUNK_SIZE_CHARS and set it directly in characters,
-# or use a proper tokenizer (e.g., tiktoken) for accurate token counting.
-
-CHUNK_SIZE = 1500  # tokens (approximate; splitter works in chars, ~4 chars/token)
-CHUNK_OVERLAP = 150  # overlap between chunks to avoid losing context at seams
+CHUNK_SIZE = 6000  # maximum chunk size in characters (splitter works in chars)
+CHUNK_OVERLAP = 600  # overlap between chunks to avoid losing context at seams
 GLOSSARY_TOP_K = 20  # how many glossary terms to retrieve per chunk
 
 
