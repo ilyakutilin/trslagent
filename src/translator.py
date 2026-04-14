@@ -22,14 +22,6 @@ Translates large documents using:
 # The word-based overlap heuristic is fragile — common phrases can produce false matches
 # Consider using difflib.SequenceMatcher for more robust overlap detection.
 
-# TODO: .gitignore` doesn't include chroma_db/
-# The ChromaDB persistence directory (./chroma_db/) should be in .gitignore.
-
-# TODO: main.py is unused boilerplate
-# The main.py at project root just prints "Hello from trslagent!" and doesn't reference
-# the actual translation functionality. It should either be the CLI entry point
-# or be removed.
-
 # TODO: README CLI examples don't match src/ layout
 # README shows python translator.py but the file is at src/translator.py.
 # The Python examples use top-level imports that won't work.
@@ -195,12 +187,6 @@ def build_prompt(
     context_section = ""
     if previous_translated:
         # Pass only the tail of the previous chunk to save tokens
-        # TODO: Fix this: previous_translated truncation is crude
-        # tail = previous_translated[-400:].strip() cuts at an arbitrary character
-        # boundary — potentially mid-word or mid-sentence.
-        # Fix: truncate at the last sentence boundary (e.g., last `.` or `\n`)
-        # within the window.
-
         tail = _truncate_at_sentence_boundary(previous_translated, window=400)
         context_section = f"\n\nPREVIOUS SEGMENT (for context and style continuity — do NOT retranslate this):\n{tail}"
 
