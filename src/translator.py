@@ -116,15 +116,9 @@ def split_by_structure(text: str) -> list[str]:
     then each section is further split by split_text() if needed.
     Use this for documents with clear structural markers (chapters, sections).
     """
-    # TODO: Fix this: split_by_structure() silently drops headings
-    # re.split(pattern, text) without capture groups removes the matched headings
-    # from the output. Every chapter title, section header, etc. is deleted from the
-    # document. Fix: add capture groups to the pattern so re.split() preserves them,
-    # or use re.split(r"((?m)^...)", text).
-
     # Matches common heading patterns: "Chapter 1", "## Section", "PART I", etc.
     heading_pattern = re.compile(
-        r"(?m)^(?:chapter\s+\w+|part\s+\w+|section\s+\w+|#{1,3}\s+.+)$",
+        r"(?m)^(?:(chapter\s+\w+|part\s+\w+|section\s+\w+|#{1,3}\s+.+))$",
         re.IGNORECASE,
     )
     sections = heading_pattern.split(text)
