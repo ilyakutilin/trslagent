@@ -43,10 +43,16 @@ Translates large documents using:
 
 import os
 import re
+import time
 from typing import Optional
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from openai import OpenAI  # OpenRouter is OpenAI-compatible
+from openai import (
+    APIConnectionError,
+    APITimeoutError,
+    OpenAI,  # OpenRouter is OpenAI-compatible
+    RateLimitError,
+)
 from openai.types.chat import ChatCompletionMessageParam
 
 from src.glossary_manager import GlossaryManager
@@ -208,40 +214,90 @@ def translate_chunk(
     previous_translated: Optional[str],
     model: str = DEFAULT_MODEL,
 ) -> str:
-    # TODO: Fix this: No error handling / retry for OpenRouter API calls
-    # translate_chunk() has no try/except. Network errors, rate limits (429),
-    # or API timeouts will crash the entire multi-chunk process with no way to resume.
-    # Fix: add retry with exponential backoff (e.g., tenacity or a simple loop)
-    # and meaningful error messages.
+    # Retry logic with exponential backoff for API errors
+    max_retries = 5
+    base_delay = 1.0  # seconds
 
-    messages: list[ChatCompletionMessageParam] = [
-        {
-            "role": "system",
-            "content": "You are a professional translator. Translate text from "
-                       f"{source_lang} to {target_lang}.\n"
-                       "Rules:\n"
-                       "  1. Use the mandatory glossary terms exactly as specified.\n"
-                       "  2. Preserve formatting, paragraph breaks, and punctuation.\n"
-                       "  3. Do not add explanations or commentary — output ONLY "
-                       "the translated text.\n"
-                       "  4. Maintain the tone and style of the original.",
-        },
-        {
-            "role": "user",
-            "content": build_prompt(
-                chunk, source_lang, target_lang, glossary_terms, previous_translated
-            ),
-        },
-    ]
-    response = client.chat.completions.create(
-        model=model,
-        messages=messages,
-        temperature=0.1,  # low temperature = more consistent/literal translation
-    )
-    content = response.choices[0].message.content
-    if content is None:
-        raise ValueError("Translation failed: received empty response from API")
-    return content.strip()
+    for attempt in range(max_retries):
+        try:
+            messages: list[ChatCompletionMessageParam] = [
+                {
+                    "role": "system",
+                    "content": f"""You are a professional translator.
+Translate text from {source_lang} to {target_lang}.
+Rules:
+  1. Use the mandatory glossary terms exactly as specified.
+  2. Preserve formatting, paragraph breaks, and punctuation.
+  3. Do not add explanations or commentary — output ONLY the translated text.
+  4. Maintain the tone and style of the original.""",
+                },
+                {
+                    "role": "user",
+                    "content": build_prompt(
+                        chunk,
+                        source_lang,
+                        target_lang,
+                        glossary_terms,
+                        previous_translated,
+                    ),
+                },
+            ]
+            response = client.chat.completions.create(
+                model=model,
+                messages=messages,
+                temperature=0.1,  # low temperature = more consistent/literal translation
+            )
+            content = response.choices[0].message.content
+            if content is None:
+                raise ValueError("Translation failed: received empty response from API")
+            return content.strip()
+
+        # Handle timeouts (must be caught before APIConnectionError since it's a subclass)
+        except APITimeoutError as e:
+            if attempt == max_retries - 1:
+                raise RuntimeError(
+                    f"Request timed out after {max_retries} retries. "
+                    f"The API is taking too long to respond.\n"
+                    f"Original error: {str(e)}"
+                )
+            wait_time = base_delay * (2**attempt)  # exponential backoff
+            if attempt < max_retries - 1:
+                time.sleep(wait_time)
+            continue
+
+        # Handle rate limiting (429)
+        except RateLimitError as e:
+            if attempt == max_retries - 1:
+                raise RuntimeError(
+                    f"Rate limit exceeded after {max_retries} retries. "
+                    f"Please wait a moment and try again.\n"
+                    f"Original error: {str(e)}"
+                )
+            wait_time = base_delay * (2**attempt)  # exponential backoff
+            if attempt < max_retries - 1:
+                time.sleep(wait_time)
+            continue
+
+        # Handle network/connection errors
+        except APIConnectionError as e:
+            if attempt == max_retries - 1:
+                raise RuntimeError(
+                    f"Network error after {max_retries} retries. "
+                    f"Please check your internet connection and try again.\n"
+                    f"Original error: {str(e)}"
+                )
+            wait_time = base_delay * (2**attempt)
+            if attempt < max_retries - 1:
+                time.sleep(wait_time)
+            continue
+
+        # Handle other errors (not retried)
+        except Exception as e:
+            # Re-raise any other exceptions without retrying
+            raise RuntimeError(f"Translation failed: {str(e)}") from e
+
+    # Fallback: should never reach here due to exception handling, but satisfies type checker
+    return ""
 
 
 def stitch_chunks(
