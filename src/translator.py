@@ -201,7 +201,7 @@ def build_prompt(
         # Fix: truncate at the last sentence boundary (e.g., last `.` or `\n`)
         # within the window.
 
-        tail = previous_translated[-400:].strip()
+        tail = _truncate_at_sentence_boundary(previous_translated, window=400)
         context_section = f"\n\nPREVIOUS SEGMENT (for context and style continuity — do NOT retranslate this):\n{tail}"
 
     prompt = (
@@ -349,6 +349,43 @@ def _find_seam(tail: str, head: str) -> int:
         if idx != -1:
             return idx + len(snippet)
     return 0  # no overlap found, just concatenate
+
+
+def _truncate_at_sentence_boundary(text: str, window: int = 400) -> str:
+    """
+    Truncates text at the last sentence or paragraph boundary within a character window.
+
+    Args:
+        text: The text to potentially truncate
+        window: Maximum characters to consider from the end
+
+    Returns:
+        Text truncated at the last sentence/paragraph boundary, or up to `window`
+        characters if no boundary is found.
+    """
+    # Take the last N characters to consider
+    if len(text) <= window:
+        return text.strip()
+
+    tail = text[-window:]
+
+    # Sentence boundaries: period, exclamation mark, question mark, or double newline
+    boundary_markers = [(". ", "! ", "? "), ("\n\n", "\n\n"), "\n"]
+
+    # Find the last occurrence of any boundary marker
+    last_boundary_idx = -1
+    for marker in boundary_markers:
+        idx = tail.rfind(marker)
+        if idx != -1:
+            last_boundary_idx = max(last_boundary_idx, idx + len(marker))
+
+    # If we found a boundary, truncate there; otherwise use full window
+    if last_boundary_idx > 0:
+        truncated = text[-window:-last_boundary_idx]
+    else:
+        truncated = tail.strip()
+
+    return truncated
 
 
 # ── Main entry point ──────────────────────────────────────────────────────────
