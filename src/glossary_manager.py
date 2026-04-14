@@ -86,11 +86,6 @@ class GlossaryManager:
         """
         collection = self._get_collection()
 
-        # TODO: Fix this: force_reload=True doesn't clear stale entries
-        # When re-embedding after removing terms from the CSV, the old entries remain
-        # in ChromaDB (upsert updates existing IDs but doesn't delete removed ones).
-        # Fix: call self.clear() before re-embedding when force_reload=True.
-
         if not force_reload and collection.count() > 0:
             print(
                 f"Glossary already loaded ({collection.count()} entries). Skipping embed step."
@@ -98,6 +93,10 @@ class GlossaryManager:
             print("Pass force_reload=True to re-embed from scratch.")
             self._load_terms_from_csv(csv_path)
             return
+
+        if force_reload:
+            print("Clearing existing ChromaDB collection...")
+            self.clear()
 
         print(f"Loading glossary from {csv_path}...")
         self._load_terms_from_csv(csv_path)
@@ -115,13 +114,23 @@ class GlossaryManager:
             src = term["source"]
             tgt = term["target"]
 
+            # Store canonical pair (first term is always canonical_source, second is canonical_target)
+            # This allows us to normalize the direction in retrieval
+            canonical_src, canonical_tgt = sorted([src, tgt])
+
             # Forward entry (source → target)
             fwd_text = f"passage: {src}"
             fwd_embedding = model.encode(fwd_text, normalize_embeddings=True).tolist()
             ids.append(f"fwd_{i}")
             embeddings.append(fwd_embedding)
             documents.append(src)
-            metadatas.append({"source": src, "target": tgt, "direction": "fwd"})
+            metadatas.append({
+                "source": src,
+                "target": tgt,
+                "direction": "fwd",
+                "canonical_source": canonical_src,
+                "canonical_target": canonical_tgt
+            })
 
             # Reverse entry (target → source) — same pair, but queryable from target lang
             rev_text = f"passage: {tgt}"
@@ -129,7 +138,13 @@ class GlossaryManager:
             ids.append(f"rev_{i}")
             embeddings.append(rev_embedding)
             documents.append(tgt)
-            metadatas.append({"source": tgt, "target": src, "direction": "rev"})
+            metadatas.append({
+                "source": tgt,
+                "target": src,
+                "direction": "rev",
+                "canonical_source": canonical_src,
+                "canonical_target": canonical_tgt
+            })
 
         # Batch upsert (handles duplicates gracefully)
         BATCH = 500
@@ -178,17 +193,6 @@ class GlossaryManager:
         The returned dicts always have source=source_lang term, target=target_lang term
         regardless of which direction the DB entry was stored in.
         """
-        # TODO: Fix this: this method doesn't normalize glossary direction
-        # terms may be returned backwards
-        # The method accepts source_lang and `target_lang` but never uses them.
-        # Both forward and reverse entries are stored;
-        # a query might return a "rev" entry like
-        # {source: "Vertragsauflösung", target: "contract termination"} when
-        # translating English→German — telling the LLM the opposite of what's needed.
-        # Fix: store the canonical pair (e.g., canonical_source / canonical_target)
-        # in metadata, and always return terms oriented to the requested
-        # source_lang→target_lang.
-
         model = self._get_model()
         collection = self._get_collection()
 
@@ -208,22 +212,40 @@ class GlossaryManager:
             include=["metadatas", "distances"],
         )
 
+        # Check if we got any results
+        if not results or not results["metadatas"] or not results["metadatas"][0]:
+            return []
+
         seen_pairs = set()
         terms = []
-        # TODO: Fix this: retrieve() deduplication doesn't account for direction
-        # seen_pairs uses (meta["source"], meta["target"]) as key,
-        # but fwd and rev entries have swapped pairs — so the same conceptual pair
-        # isn't deduplicated.
-        # Fix: normalize pair keys (e.g., tuple(sorted(pair))) or just store canonical pair.
 
         for meta in results["metadatas"][0]:
-            pair_key = (meta["source"], meta["target"])
-            if pair_key in seen_pairs:
+            # Use canonical pair for deduplication (sorted ensures fwd and rev are grouped)
+            canonical_pair = (meta["canonical_source"], meta["canonical_target"])
+            if canonical_pair in seen_pairs:
                 continue
-            seen_pairs.add(pair_key)
-            # Normalise direction: always return {source: src_lang, target: tgt_lang}
-            # We stored both directions so we just use what we got
-            terms.append({"source": meta["source"], "target": meta["target"]})
+            seen_pairs.add(canonical_pair)
+
+            # Normalize direction: always return {source: src_lang, target: tgt_lang}
+            # Compare the requested languages with the canonical pair
+            canonical_src, canonical_tgt = canonical_pair
+            
+            # Safely convert to strings for comparison
+            src_lang_str = str(source_lang).lower()
+            tgt_lang_str = str(target_lang).lower()
+            canonical_src_str = str(canonical_src).lower()
+            canonical_tgt_str = str(canonical_tgt).lower()
+            
+            if canonical_src_str == src_lang_str and canonical_tgt_str == tgt_lang_str:
+                # Entry already in correct direction
+                terms.append({"source": meta["source"], "target": meta["target"]})
+            elif canonical_src_str == tgt_lang_str and canonical_tgt_str == src_lang_str:
+                # Entry is reversed - swap it
+                terms.append({"source": meta["target"], "target": meta["source"]})
+            else:
+                # Shouldn't happen if canonical pairs are consistent, but return as-is
+                terms.append({"source": meta["source"], "target": meta["target"]})
+            
             if len(terms) >= top_k:
                 break
 
