@@ -137,7 +137,21 @@ def split_by_structure(text: str) -> list[str]:
 # ── Translation prompt ────────────────────────────────────────────────────────
 
 
-def build_prompt(
+def build_system_prompt(source_lang: str, target_lang: str) -> str:
+    """
+    Builds the system prompt with translation instructions and rules.
+    This is shared across all translations.
+    """
+    return f"""You are a professional translator.
+Translate text from {source_lang} to {target_lang}.
+Rules:
+  1. Use the mandatory glossary terms exactly as specified.
+  2. Preserve formatting, paragraph breaks, and punctuation.
+  3. Do not add explanations or commentary — output ONLY the translated text.
+  4. Maintain the tone and style of the original."""
+
+
+def build_user_prompt(
     chunk: str,
     source_lang: str,
     target_lang: str,
@@ -145,14 +159,12 @@ def build_prompt(
     previous_translated: Optional[str] = None,
 ) -> str:
     """
-    Builds the translation prompt with:
-    - Mandatory glossary terms (retrieved via RAG)
+    Builds the user prompt with chunk-specific content:
+    - Glossary terms (retrieved via RAG)
     - Optional previous segment tail for context continuity
+    - The text to translate
     """
-    # TODO: Use system message for LLM prompt structure
-    # Currently the entire prompt goes as a single user message.
-    # Separating instructions (system) from content (user) is more idiomatic
-    # for chat models and typically improves instruction-following.
+    # Build glossary section
     glossary_section = ""
     if glossary_terms:
         # Filter terms to only include those that appear in the chunk text
@@ -184,19 +196,16 @@ def build_prompt(
                 "do not paraphrase or substitute them):\n" + "\n".join(lines)
             )
 
+    # Build context section with previous translated segment
     context_section = ""
     if previous_translated:
         # Pass only the tail of the previous chunk to save tokens
         tail = _truncate_at_sentence_boundary(previous_translated, window=400)
         context_section = f"\n\nPREVIOUS SEGMENT (for context and style continuity — do NOT retranslate this):\n{tail}"
 
+    # Combine all sections
     prompt = (
-        f"You are a professional translator. Translate the following text from {source_lang} to {target_lang}.\n"
-        f"Rules:\n"
-        f"  1. Use the mandatory glossary terms exactly as specified.\n"
-        f"  2. Preserve formatting, paragraph breaks, and punctuation.\n"
-        f"  3. Do not add explanations or commentary — output ONLY the translated text.\n"
-        f"  4. Maintain the tone and style of the original."
+        f"Translate the following text from {source_lang} to {target_lang}:\n"
         f"{glossary_section}"
         f"{context_section}"
         f"\n\nTEXT TO TRANSLATE:\n{chunk}"
@@ -225,17 +234,11 @@ def translate_chunk(
             messages: list[ChatCompletionMessageParam] = [
                 {
                     "role": "system",
-                    "content": f"""You are a professional translator.
-Translate text from {source_lang} to {target_lang}.
-Rules:
-  1. Use the mandatory glossary terms exactly as specified.
-  2. Preserve formatting, paragraph breaks, and punctuation.
-  3. Do not add explanations or commentary — output ONLY the translated text.
-  4. Maintain the tone and style of the original.""",
+                    "content": build_system_prompt(source_lang, target_lang),
                 },
                 {
                     "role": "user",
-                    "content": build_prompt(
+                    "content": build_user_prompt(
                         chunk,
                         source_lang,
                         target_lang,
