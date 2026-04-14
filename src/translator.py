@@ -163,18 +163,34 @@ def build_prompt(
     # for chat models and typically improves instruction-following.
     glossary_section = ""
     if glossary_terms:
-        lines = [f"  {t['source']} → {t['target']}" for t in glossary_terms]
-        # TODO: Fix this: All retrieved glossary terms are marked "MANDATORY" even when irrelevant
-        # Retrieving top-20 terms by embedding similarity doesn't guarantee they appear
-        # in the chunk. The prompt says "you MUST use these" for terms that aren't even
-        # in the text — wasting tokens and potentially confusing the model.
-        # Fix: filter terms to only include those that actually appear (even partially)
-        # in the chunk text, or add a relevance threshold on the distance score.
+        # Filter terms to only include those that appear in the chunk text
+        # We use partial matching to catch terms that are substrings or variations
+        # This prevents including irrelevant glossary terms and reduces prompt size
+        filtered_terms = []
+        chunk_lower = chunk.lower()
 
-        glossary_section = (
-            "\n\nMANDATORY GLOSSARY (you MUST use these translations exactly as given, "
-            "do not paraphrase or substitute them):\n" + "\n".join(lines)
-        )
+        for term_dict in glossary_terms:
+            # Handle different possible key names for source term
+            source_key = "source"
+            if "term" in term_dict and source_key not in term_dict:
+                source_key = "term"
+            elif "source_term" in term_dict and source_key not in term_dict:
+                source_key = "source_term"
+
+            if source_key not in term_dict:
+                continue  # Skip invalid entry
+
+            # Check if source term appears in chunk (case-insensitive partial match)
+            source_term = str(term_dict[source_key])
+            if source_term.lower() in chunk_lower:
+                filtered_terms.append(term_dict)
+
+        if filtered_terms:
+            lines = [f"  {t['source']} → {t['target']}" for t in filtered_terms]
+            glossary_section = (
+                "\n\nMANDATORY GLOSSARY (you MUST use these translations exactly as given, "
+                "do not paraphrase or substitute them):\n" + "\n".join(lines)
+            )
 
     context_section = ""
     if previous_translated:
