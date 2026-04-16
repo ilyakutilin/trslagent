@@ -34,12 +34,12 @@ def split_text(
       2. Falls back to single newlines, then sentences (". "), then words.
     This means it will never cut in the middle of a sentence if avoidable.
 
-    chunk_size is in characters (≈ chunk_size/4 tokens).
+    chunk_size is in characters.
     """
     splitter = RecursiveCharacterTextSplitter(
         separators=["\n\n", "\n", ". ", "! ", "? ", " ", ""],
-        chunk_size=chunk_size * 4,  # convert approximate token count → chars
-        chunk_overlap=chunk_overlap * 4,
+        chunk_size=chunk_size,
+        chunk_overlap=chunk_overlap,
         length_function=len,
         is_separator_regex=False,
     )
