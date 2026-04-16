@@ -5,8 +5,30 @@ Uses pydantic-settings for type-safe, environment-based configuration.
 Settings are organized into logical classes and can be overridden via environment variables or .env file.
 """
 
+import sys
+from typing import Literal
+
+from loguru import logger
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class LoggingSettings(BaseSettings):
+    """Logging settings"""
+
+    model_config = SettingsConfigDict(env_prefix="LOG_")
+
+    level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
+        default="INFO", description="Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)"
+    )
+    format: str = Field(
+        default=(
+            "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> |"
+            " <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - "
+            "<level>{message}</level>"
+        ),
+        description="Log format string",
+    )
 
 
 class LLMSettings(BaseSettings):
@@ -59,6 +81,7 @@ class GlossarySettings(BaseSettings):
 class Settings(BaseSettings):
     """Main settings container"""
 
+    logging: LoggingSettings = Field(default_factory=LoggingSettings)
     llm: LLMSettings = Field(default_factory=LLMSettings)
     chunking: ChunkingSettings = Field(default_factory=ChunkingSettings)
     glossary: GlossarySettings = Field(default_factory=GlossarySettings)
@@ -84,3 +107,23 @@ def get_settings() -> Settings:
     if _settings is None:
         _settings = Settings()
     return _settings
+
+
+def setup_logging() -> None:
+    """Configure loguru logger to output to stderr only."""
+    settings = get_settings()
+
+    # Remove default handler
+    logger.remove()
+
+    # Add stderr handler with configured format and level
+    logger.add(
+        sys.stderr,
+        format=settings.logging.format,
+        level=settings.logging.level,
+        colorize=True,
+    )
+
+
+# Export logger for use in other modules
+__all__ = ["logger", "get_settings", "setup_logging", "Settings"]

@@ -17,7 +17,7 @@ from openai import (
 )
 from openai.types.chat import ChatCompletionMessageParam
 
-from src.config import get_settings
+from src.config import get_settings, logger
 from src.glossary_manager import GlossaryManager
 from src.splitter import CHUNK_OVERLAP, split_by_structure, split_text
 
@@ -296,7 +296,6 @@ def translate_document(
     glossary_manager: GlossaryManager,
     model: str = DEFAULT_MODEL,
     use_structural_split: bool = False,
-    verbose: bool = True,
 ) -> str:
     """
     Full pipeline:
@@ -312,16 +311,14 @@ def translate_document(
     else:
         chunks = split_text(text)
 
-    if verbose:
-        print(f"Split into {len(chunks)} chunks.")
+    logger.info(f"Split into {len(chunks)} chunks.")
 
     # Step 2: Translate chunk by chunk
     translated_chunks = []
     previous_translated = None
 
     for i, chunk in enumerate(chunks):
-        if verbose:
-            print(f"Translating chunk {i + 1}/{len(chunks)}...")
+        logger.info(f"Translating chunk {i + 1}/{len(chunks)}...")
 
         # Retrieve relevant glossary terms for this chunk
         glossary_terms = glossary_manager.retrieve(
@@ -345,8 +342,7 @@ def translate_document(
 
     # Step 3: Stitch
     result = stitch_chunks(translated_chunks)
-    if verbose:
-        print("Translation complete.")
+    logger.info("Translation complete.")
     return result
 
 
@@ -389,4 +385,4 @@ if __name__ == "__main__":
     with open(args.output, "w", encoding="utf-8") as f:
         f.write(result)
 
-    print(f"Saved to {args.output}")
+    logger.info(f"Saved to {args.output}")

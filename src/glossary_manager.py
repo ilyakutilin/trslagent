@@ -20,7 +20,7 @@ import chromadb
 from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
 
-from src.config import get_settings
+from src.config import get_settings, logger
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
@@ -58,11 +58,11 @@ class GlossaryManager:
     def _get_model(self) -> SentenceTransformer:
         """Load the embedding model once, reuse thereafter."""
         if self.model is None:
-            print(
+            logger.info(
                 f"Loading embedding model '{EMBEDDING_MODEL}' (first run downloads ~2GB)..."
             )
             self.model = SentenceTransformer(EMBEDDING_MODEL)
-            print("Model loaded.")
+            logger.info("Model loaded.")
         return self.model
 
     # ── ChromaDB setup ────────────────────────────────────────────────────────
@@ -90,18 +90,18 @@ class GlossaryManager:
         collection = self._get_collection()
 
         if not force_reload and collection.count() > 0:
-            print(
+            logger.info(
                 f"Glossary already loaded ({collection.count()} entries). Skipping embed step."
             )
-            print("Pass force_reload=True to re-embed from scratch.")
+            logger.info("Pass force_reload=True to re-embed from scratch.")
             self._load_terms_from_csv(csv_path)
             return
 
         if force_reload:
-            print("Clearing existing ChromaDB collection...")
+            logger.info("Clearing existing ChromaDB collection...")
             self.clear()
 
-        print(f"Loading glossary from {csv_path}...")
+        logger.info(f"Loading glossary from {csv_path}...")
         self._load_terms_from_csv(csv_path)
 
         if not self._terms:
@@ -162,9 +162,11 @@ class GlossaryManager:
                 documents=documents[start : start + BATCH],
                 metadatas=metadatas[start : start + BATCH],
             )
-            print(f"  Upserted {min(start + BATCH, len(ids))}/{len(ids)} entries...")
+            logger.info(
+                f"  Upserted {min(start + BATCH, len(ids))}/{len(ids)} entries..."
+            )
 
-        print(
+        logger.info(
             f"Glossary embedded and stored. Total entries in DB: {collection.count()}"
         )
 
@@ -182,7 +184,7 @@ class GlossaryManager:
                     continue
                 if source and target:
                     self._terms.append({"source": source, "target": target})
-        print(f"Read {len(self._terms)} terms from CSV.")
+        logger.info(f"Read {len(self._terms)} terms from CSV.")
 
     # ── RAG retrieval ─────────────────────────────────────────────────────────
 
@@ -273,4 +275,4 @@ class GlossaryManager:
         )
         client.delete_collection(COLLECTION_NAME)
         self.collection = None
-        print("Collection cleared.")
+        logger.info("Collection cleared.")
