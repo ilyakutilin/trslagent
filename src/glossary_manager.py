@@ -13,8 +13,6 @@ Glossary CSV format (no header required, but header is fine):
 The glossary is bidirectional: querying in either language will find the entry.
 """
 
-# TODO: Implement logging instead of print()
-
 import csv
 from typing import Optional
 

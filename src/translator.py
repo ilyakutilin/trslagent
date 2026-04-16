@@ -6,32 +6,6 @@ Translates large documents using:
 - OpenRouter API for LLM translation
 """
 
-# TODO: Implement logging instead of print()
-
-# TODO: No parallel/batch translation
-# Chunks are translated sequentially.
-# For large documents, concurrent requests (e.g., concurrent.futures.ThreadPoolExecutor)
-# could significantly speed things up, with configurable max workers.
-
-# TODO: No progress resumption for long documents
-# If the process crashes at chunk 50/100, there's no way to resume.
-# Fix: save translated chunks incrementally to a temp file and support --resume.
-
-# TODO: Better seam detection in stitch_chunks()
-# The word-based overlap heuristic is fragile — common phrases can produce false matches
-# Consider using difflib.SequenceMatcher for more robust overlap detection.
-
-# TODO: README CLI examples don't match src/ layout
-# README shows python translator.py but the file is at src/translator.py.
-# The Python examples use top-level imports that won't work.
-# Fix: update README to match actual structure, or add a proper CLI entry point
-# via pyproject.toml [project.scripts].
-
-# TODO: Configurable e5 prefix for alternative embedding models
-# The "query: " / "passage: " prefixes are specific to e5 models and hardcoded.
-# If someone swaps the model, these prefixes would be wrong.
-# Fix: make prefixes configurable or auto-detect based on model name.
-
 import time
 from typing import Optional
 
