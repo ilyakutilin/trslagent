@@ -5,8 +5,6 @@ Splits large documents into chunks that respect sentence and paragraph boundarie
 Uses RecursiveCharacterTextSplitter for sentence-safe chunking.
 """
 
-import re
-
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from src.config import get_settings
@@ -45,28 +43,3 @@ def split_text(
     )
     chunks = splitter.split_text(text)
     return chunks
-
-
-def split_by_structure(text: str) -> list[str]:
-    """
-    Optional pre-split step: splits on headings or chapter markers FIRST,
-    then each section is further split by split_text() if needed.
-    Use this for documents with clear structural markers (chapters, sections).
-    """
-    # Matches common heading patterns: "Chapter 1", "## Section", "PART I", etc.
-    heading_pattern = re.compile(
-        r"(?m)^(?:(chapter\s+\w+|part\s+\w+|section\s+\w+|#{1,3}\s+.+))$",
-        re.IGNORECASE,
-    )
-    sections = heading_pattern.split(text)
-    all_chunks = []
-    for section in sections:
-        section = section.strip()
-        if not section:
-            continue
-        # If the section is small enough, keep as-is; otherwise chunk it
-        if len(section) <= CHUNK_SIZE * 4:
-            all_chunks.append(section)
-        else:
-            all_chunks.extend(split_text(section))
-    return all_chunks

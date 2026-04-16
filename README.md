@@ -47,11 +47,6 @@ python translator.py document.txt English German \
     --glossary glossary.csv \
     --output translated.txt \
     --model anthropic/claude-3.5-sonnet
-
-# For structured documents with chapters/headings:
-python translator.py document.txt English German \
-    --glossary glossary.csv \
-    --structural-split
 ```
 
 ### In Python

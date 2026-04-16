@@ -19,7 +19,7 @@ from openai.types.chat import ChatCompletionMessageParam
 
 from src.config import get_settings, logger
 from src.glossary_manager import GlossaryManager
-from src.splitter import CHUNK_OVERLAP, split_by_structure, split_text
+from src.splitter import CHUNK_OVERLAP, split_text
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
@@ -295,7 +295,6 @@ def translate_document(
     target_lang: str,
     glossary_manager: GlossaryManager,
     model: str = DEFAULT_MODEL,
-    use_structural_split: bool = False,
 ) -> str:
     """
     Full pipeline:
@@ -306,10 +305,7 @@ def translate_document(
     client = get_llm_client()
 
     # Step 1: Split
-    if use_structural_split:
-        chunks = split_by_structure(text)
-    else:
-        chunks = split_text(text)
+    chunks = split_text(text)
 
     logger.info(f"Split into {len(chunks)} chunks.")
 
@@ -362,9 +358,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model", default=DEFAULT_MODEL, help="OpenRouter model string"
     )
-    parser.add_argument(
-        "--structural-split", action="store_true", help="Pre-split by headings/chapters"
-    )
     args = parser.parse_args()
 
     with open(args.input_file, "r", encoding="utf-8") as f:
@@ -379,7 +372,6 @@ if __name__ == "__main__":
         target_lang=args.target_lang,
         glossary_manager=gm,
         model=args.model,
-        use_structural_split=args.structural_split,
     )
 
     with open(args.output, "w", encoding="utf-8") as f:
