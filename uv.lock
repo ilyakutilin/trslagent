@@ -2091,6 +2091,7 @@ dependencies = [
     { name = "chromadb" },
     { name = "langchain-text-splitters" },
     { name = "openai" },
+    { name = "pydantic-settings" },
     { name = "sentence-transformers" },
     { name = "torch" },
 ]
@@ -2100,6 +2101,7 @@ requires-dist = [
     { name = "chromadb", specifier = ">=1.5.7" },
     { name = "langchain-text-splitters", specifier = ">=1.1.1" },
     { name = "openai", specifier = ">=2.31.0" },
+    { name = "pydantic-settings", specifier = ">=2.1.0" },
     { name = "sentence-transformers", specifier = ">=5.4.0" },
     { name = "torch", specifier = ">=2.11.0" },
 ]
