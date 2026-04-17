@@ -12,11 +12,8 @@ Translates large documents using:
 ## Setup
 
 ```bash
-# 1. Install dependencies
-pip install -r requirements.txt
-
-# 2. Set your OpenRouter API key
-export OPENROUTER_API_KEY=sk-or-...
+# Install dependencies
+uv sync
 ```
 
 The first run will download the `multilingual-e5-large` model (~2GB). This is cached locally by `sentence-transformers` — subsequent runs are instant.
@@ -43,7 +40,7 @@ The glossary is **bidirectional** — you only need each pair once. The system e
 ### Command line
 
 ```bash
-python translator.py document.txt English German \
+python src/translator.py document.txt English German \
     --glossary glossary.csv \
     --output translated.txt \
     --model anthropic/claude-3.5-sonnet
@@ -52,8 +49,8 @@ python translator.py document.txt English German \
 ### In Python
 
 ```python
-from glossary_manager import GlossaryManager
-from translator import translate_document
+from src.glossary_manager import GlossaryManager
+from src.translator import translate_document
 
 gm = GlossaryManager()
 gm.load_glossary("glossary.csv")   # embeds on first run, cached after
@@ -107,21 +104,12 @@ Final translated document
 
 ## Configuration
 
-In `translator.py`:
+```bash
+cp .env.example .env
+chmod 600 .env
+```
 
-| Variable         | Default                       | Description                        |
-| ---------------- | ----------------------------- | ---------------------------------- |
-| `DEFAULT_MODEL`  | `anthropic/claude-3.5-sonnet` | OpenRouter model                   |
-| `CHUNK_SIZE`     | `1500`                        | Approx. tokens per chunk           |
-| `CHUNK_OVERLAP`  | `150`                         | Overlap tokens between chunks      |
-| `GLOSSARY_TOP_K` | `20`                          | Glossary terms retrieved per chunk |
-
-In `glossary_manager.py`:
-
-| Variable          | Default                          | Description                      |
-| ----------------- | -------------------------------- | -------------------------------- |
-| `EMBEDDING_MODEL` | `intfloat/multilingual-e5-large` | HuggingFace model for embeddings |
-| `CHROMA_DIR`      | `./chroma_db`                    | Where ChromaDB stores data       |
+Then edit the values.
 
 ---
 
@@ -144,6 +132,6 @@ A lighter alternative is `intfloat/multilingual-e5-small` (~120MB vs ~2GB) — g
   ```python
   gm.load_glossary("glossary.csv", force_reload=True)
   ```
-- **Lower temperature** (`0.1`) in `translate_chunk()` gives more consistent, literal output — appropriate for technical/legal documents.
-- **Chunk size tuning**: larger chunks = more context per prompt = better translation quality, but higher cost. Start with 1500 tokens and adjust.
+- **Lower temperature** (`0.1`) in the config gives more consistent, literal output — appropriate for technical/legal documents.
+- **Chunk size tuning**: larger chunks = more context per prompt = better translation quality, but higher cost. Start with 6000 characters and adjust.
 - **OpenRouter model strings**: find them at https://openrouter.ai/models
