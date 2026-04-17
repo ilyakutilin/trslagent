@@ -1,11 +1,12 @@
 """
 Glossary Manager
 ================
-Loads a glossary CSV, embeds all terms using multilingual-e5-large,
+Loads a glossary CSV or XLSX, embeds all terms using multilingual-e5-large,
 stores them in ChromaDB, and provides RAG-style retrieval per chunk.
 
-Glossary CSV format (no header required, but header is fine):
-  source_term, target_term
+Glossary file format (no header required, but header is fine):
+  Two columns: source_term, target_term
+  Supported formats: .csv, .xlsx
   e.g.:
   contract termination, Vertragsauflösung
   force majeure, höhere Gewalt
@@ -14,10 +15,12 @@ The glossary is bidirectional: querying in either language will find the entry.
 """
 
 import csv
+import os
 from typing import Optional
 
 import chromadb
 from chromadb.config import Settings
+from openpyxl import load_workbook
 from sentence_transformers import SentenceTransformer
 
 from src.config import get_settings, logger
@@ -80,9 +83,11 @@ class GlossaryManager:
 
     # ── Glossary loading & embedding ──────────────────────────────────────────
 
-    def load_glossary(self, csv_path: str, force_reload: bool = False) -> None:
+    def load_glossary(
+        self, glossary_source_path: str, force_reload: bool = False
+    ) -> None:
         """
-        Reads glossary CSV and upserts all terms into ChromaDB.
+        Reads glossary CSV or XLSX and upserts all terms into ChromaDB.
         On subsequent runs (chroma_db/ exists), skips re-embedding unless
         force_reload=True — so the expensive embedding only happens once.
         """
@@ -94,18 +99,18 @@ class GlossaryManager:
                 "Skipping embed step."
             )
             logger.info("Pass force_reload=True to re-embed from scratch.")
-            self._load_terms_from_csv(csv_path)
+            self._load_terms_from_file(glossary_source_path)
             return
 
         if force_reload:
             logger.info("Clearing existing ChromaDB collection...")
             self.clear()
 
-        logger.info(f"Loading glossary from {csv_path}...")
-        self._load_terms_from_csv(csv_path)
+        logger.info(f"Loading glossary from {glossary_source_path}...")
+        self._load_terms_from_file(glossary_source_path)
 
         if not self._terms:
-            raise ValueError("Glossary is empty. Check your CSV file.")
+            raise ValueError("Glossary is empty. Check your file.")
 
         model = self._get_model()
 
@@ -175,16 +180,60 @@ class GlossaryManager:
         self._terms = []
         with open(csv_path, newline="", encoding="utf-8") as f:
             reader = csv.reader(f)
+            # Skip header row
+            next(reader, None)
             for row in reader:
                 if len(row) < 2:
                     continue
                 source, target = row[0].strip(), row[1].strip()
-                # Skip header rows
-                if source.lower() in ("source", "source_term", "term", "from"):
-                    continue
                 if source and target:
                     self._terms.append({"source": source, "target": target})
         logger.info(f"Read {len(self._terms)} terms from CSV.")
+
+    def _load_terms_from_xlsx(self, xlsx_path: str) -> None:
+        """Read XLSX into self._terms list."""
+        self._terms = []
+
+        if not os.path.exists(xlsx_path):
+            raise FileNotFoundError(f"XLSX file not found: {xlsx_path}")
+
+        try:
+            workbook = load_workbook(xlsx_path, read_only=True, data_only=True)
+            sheet = workbook.active
+
+            if sheet is None:
+                workbook.close()
+                raise ValueError("XLSX file is empty or has no active sheet.")
+
+            # Skip header row by enumerating and skipping index 0
+            for i, row in enumerate(sheet.iter_rows(values_only=True)):
+                if i == 0:  # Skip header row
+                    continue
+                if not row or len(row) < 2:
+                    continue
+                source, target = str(row[0]).strip(), str(row[1]).strip()
+                if source and target:
+                    self._terms.append({"source": source, "target": target})
+
+        finally:
+            if "workbook" in locals():
+                workbook.close()
+
+        logger.info(f"Read {len(self._terms)} terms from XLSX.")
+
+    def _load_terms_from_file(self, file_path: str) -> None:
+        """Auto-detect file format and load accordingly."""
+        ext = os.path.splitext(file_path)[1].lower()
+
+        if ext == ".csv":
+            self._load_terms_from_csv(file_path)
+        elif ext == ".xlsx":
+            self._load_terms_from_xlsx(file_path)
+        else:
+            raise ValueError(
+                f"Unsupported file format '{ext}'. "
+                "Only .csv and .xlsx files are supported."
+            )
 
     # ── RAG retrieval ─────────────────────────────────────────────────────────
 

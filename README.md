@@ -20,9 +20,13 @@ The first run will download the `multilingual-e5-large` model (~2GB). This is ca
 
 ---
 
-## Glossary CSV format
+## Glossary format
 
-A simple two-column CSV. Header row is optional (auto-detected and skipped).
+A simple two-column file. Header row is optional (auto-detected and skipped).
+
+Supported formats: **CSV** (`.csv`) and **XLSX** (`.xlsx`).
+
+### CSV example
 
 ```csv
 source_term,target_term
@@ -30,6 +34,16 @@ contract termination,Vertragsauflösung
 force majeure,höhere Gewalt
 party of the first part,Partei des ersten Teils
 ```
+
+### XLSX example
+
+An Excel spreadsheet with two columns:
+
+| source_term             | target_term             |
+| ----------------------- | ----------------------- |
+| contract termination    | Vertragsauflösung       |
+| force majeure           | höhere Gewalt           |
+| party of the first part | Partei des ersten Teils |
 
 The glossary is **bidirectional** — you only need each pair once. The system embeds both directions so queries from either language find the right entry.
 
