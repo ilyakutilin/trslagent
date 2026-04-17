@@ -2,7 +2,8 @@
 Centralized Configuration
 =========================
 Uses pydantic-settings for type-safe, environment-based configuration.
-Settings are organized into logical classes and can be overridden via environment variables or .env file.
+Settings are organized into logical classes and can be overridden
+via environment variables or .env file.
 """
 
 import sys
@@ -93,19 +94,12 @@ class Settings(BaseSettings):
     )
 
 
-# Global settings instance (lazy evaluation for API key fix)
-_settings: Settings | None = None
+# Global settings instance
+_settings = Settings()
 
 
 def get_settings() -> Settings:
-    """Get or create the global settings instance.
-
-    This fixes the TODO in translator.py where OPENROUTER_API_KEY was captured at module import time.
-    The API key is now read lazily when first requested.
-    """
-    global _settings
-    if _settings is None:
-        _settings = Settings()
+    """Get the global settings instance."""
     return _settings
 
 
