@@ -17,8 +17,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class LoggingSettings(BaseSettings):
     """Logging settings"""
 
-    model_config = SettingsConfigDict(env_prefix="LOG_")
-
     level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
         default="INFO", description="Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)"
     )
@@ -35,8 +33,6 @@ class LoggingSettings(BaseSettings):
 class LLMSettings(BaseSettings):
     """LLM/OpenRouter API settings"""
 
-    model_config = SettingsConfigDict(env_prefix="LLM_")
-
     api_key: str = Field(default="", description="OpenRouter API key")
     model: str = Field(
         default="anthropic/claude-3.5-sonnet",
@@ -51,8 +47,6 @@ class LLMSettings(BaseSettings):
 class ChunkingSettings(BaseSettings):
     """Text chunking settings"""
 
-    model_config = SettingsConfigDict(env_prefix="CHUNK_")
-
     size: int = Field(default=6000, description="Maximum chunk size in characters")
     overlap: int = Field(
         default=600, description="Overlap between chunks in characters"
@@ -61,8 +55,6 @@ class ChunkingSettings(BaseSettings):
 
 class GlossarySettings(BaseSettings):
     """Glossary/RAG settings"""
-
-    model_config = SettingsConfigDict(env_prefix="GLOSSARY_")
 
     top_k: int = Field(
         default=20, description="Number of glossary terms to retrieve per chunk"
@@ -82,15 +74,15 @@ class GlossarySettings(BaseSettings):
 class Settings(BaseSettings):
     """Main settings container"""
 
-    logging: LoggingSettings = Field(default_factory=LoggingSettings)
+    log: LoggingSettings = Field(default_factory=LoggingSettings)
     llm: LLMSettings = Field(default_factory=LLMSettings)
-    chunking: ChunkingSettings = Field(default_factory=ChunkingSettings)
+    chunk: ChunkingSettings = Field(default_factory=ChunkingSettings)
     glossary: GlossarySettings = Field(default_factory=GlossarySettings)
 
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
-        env_nested_delimiter="__",  # Allows LLM__API_KEY in .env
+        env_nested_delimiter="__",
     )
 
 
@@ -117,8 +109,8 @@ def setup_logging() -> None:
     # INFO and DEBUG to stdout
     logger.add(
         sys.stdout,
-        format=settings.logging.format,
-        level=settings.logging.level,
+        format=settings.log.format,
+        level=settings.log.level,
         filter=lambda record: record["level"].name in ("DEBUG", "INFO"),
         colorize=True,
     )
@@ -126,7 +118,7 @@ def setup_logging() -> None:
     # WARNING and above to stderr
     logger.add(
         sys.stderr,
-        format=settings.logging.format,
+        format=settings.log.format,
         level="WARNING",
         colorize=True,
     )

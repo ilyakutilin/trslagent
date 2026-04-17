@@ -14,8 +14,8 @@ from src.config import get_settings
 settings = get_settings()
 
 # Legacy constants for backward compatibility (deprecated, use settings object)
-CHUNK_SIZE = settings.chunking.size
-CHUNK_OVERLAP = settings.chunking.overlap
+CHUNK_SIZE = settings.chunk.size
+CHUNK_OVERLAP = settings.chunk.overlap
 
 
 # ── Text splitting ────────────────────────────────────────────────────────────

@@ -162,7 +162,7 @@ class GlossaryManager:
             logger.debug(
                 f"Embedding {i} of {total_terms}: {canonical_src} = {canonical_tgt}"
             )
-            if settings.logging.level != "DEBUG":
+            if settings.log.level != "DEBUG":
                 # Progress logging - every 100 terms
                 if (i + 1) % 100 == 0 or (i + 1) == total_terms:
                     progress_pct = ((i + 1) / total_terms) * 100
