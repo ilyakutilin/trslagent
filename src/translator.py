@@ -25,9 +25,6 @@ from src.splitter import CHUNK_OVERLAP, split_text
 
 settings = get_settings()
 
-# Legacy constants for backward compatibility (deprecated, use settings object)
-GLOSSARY_TOP_K = settings.glossary.top_k
-
 
 # ── OpenRouter client (OpenAI-compatible) ────────────────────────────────────
 
