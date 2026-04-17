@@ -7,7 +7,7 @@ Translates large documents using:
 """
 
 import time
-from typing import Optional
+from typing import Dict, Optional
 
 from openai import (
     APIConnectionError,
@@ -38,6 +38,111 @@ def get_llm_client() -> OpenAI:
     )
 
 
+# ── Glossary override ──────────────────────────────────────────────────────────
+
+
+def parse_glossary_override(override_path: str) -> Dict[str, str]:
+    """
+    Parse a glossary override file.
+
+    Format: one term per line in format "term = translation"
+    Lines starting with # are treated as comments.
+    Blank lines are ignored.
+
+    Returns a dict mapping source_term -> target_term
+    """
+    overrides = {}
+    try:
+        with open(override_path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                # Skip empty lines and comments
+                if not line or line.startswith("#"):
+                    continue
+                # Parse "term = translation"
+                if "=" in line:
+                    parts = line.split("=", 1)
+                    if len(parts) == 2:
+                        source = parts[0].strip()
+                        target = parts[1].strip()
+                        if source and target:
+                            overrides[source] = target
+    except FileNotFoundError:
+        logger.warning(f"Glossary override file not found: {override_path}")
+    except Exception as e:
+        logger.error(f"Error reading glossary override file: {e}")
+    return overrides
+
+
+def apply_glossary_override(
+    glossary_terms: list[dict], overrides: Dict[str, str], chunk: str
+) -> list[dict]:
+    """
+    Apply glossary overrides to retrieved terms.
+
+    - If a term appears in both override and retrieved glossary, use override
+    - If a term appears only in override (and in chunk), add it
+    - Otherwise keep retrieved term
+
+    Returns the final list of terms to send to LLM.
+    """
+    if not overrides:
+        return glossary_terms
+
+    # Build a lookup from retrieved terms by source (case-insensitive)
+    retrieved_by_source: Dict[str, dict] = {}
+    for term_dict in glossary_terms:
+        source_key = "source"
+        if "term" in term_dict and source_key not in term_dict:
+            source_key = "term"
+        elif "source_term" in term_dict and source_key not in term_dict:
+            source_key = "source_term"
+
+        if source_key in term_dict:
+            source_lower = str(term_dict[source_key]).lower()
+            # Store with lowercase key for case-insensitive matching
+            retrieved_by_source[source_lower] = term_dict
+
+    # Build final terms list
+    final_terms: list[dict] = []
+    seen_sources: set[str] = set()
+    chunk_lower = chunk.lower()
+
+    # First, add all override terms that appear in chunk
+    for override_src, override_tgt in overrides.items():
+        override_src_lower = override_src.lower()
+        if override_src_lower in chunk_lower:
+            # Check if this source was already added from retrieved terms
+            if override_src_lower not in seen_sources:
+                final_terms.append({"source": override_src, "target": override_tgt})
+                seen_sources.add(override_src_lower)
+
+    # Then, add retrieved terms that aren't overridden
+    for term_dict in glossary_terms:
+        source_key = "source"
+        if "term" in term_dict and source_key not in term_dict:
+            source_key = "term"
+        elif "source_term" in term_dict and source_key not in term_dict:
+            source_key = "source_term"
+
+        if source_key not in term_dict:
+            continue
+
+        source_term = str(term_dict[source_key])
+        source_lower = source_term.lower()
+
+        # Skip if this term is overridden
+        if source_lower in overrides:
+            continue
+
+        # Check if source term appears in chunk
+        if source_lower in chunk_lower and source_lower not in seen_sources:
+            final_terms.append(term_dict)
+            seen_sources.add(source_lower)
+
+    return final_terms
+
+
 # ── Translation prompt ────────────────────────────────────────────────────────
 
 
@@ -61,13 +166,20 @@ def build_user_prompt(
     target_lang: str,
     glossary_terms: list[dict],
     previous_translated: Optional[str] = None,
+    glossary_override: Optional[Dict[str, str]] = None,
 ) -> str:
     """
     Builds the user prompt with chunk-specific content:
-    - Glossary terms (retrieved via RAG)
+    - Glossary terms (retrieved via RAG, optionally overridden)
     - Optional previous segment tail for context continuity
     - The text to translate
     """
+    # Apply glossary override if provided
+    if glossary_override:
+        glossary_terms = apply_glossary_override(
+            glossary_terms, glossary_override, chunk
+        )
+
     # Build glossary section
     glossary_section = ""
     if glossary_terms:
@@ -128,6 +240,7 @@ def translate_chunk(
     glossary_terms: list[dict],
     previous_translated: Optional[str],
     model: str = settings.llm.model,
+    glossary_override: Optional[Dict[str, str]] = None,
 ) -> str:
     # Retry logic with exponential backoff for API errors
     max_retries = 5
@@ -148,6 +261,7 @@ def translate_chunk(
                         target_lang,
                         glossary_terms,
                         previous_translated,
+                        glossary_override,
                     ),
                 },
             ]
@@ -290,6 +404,7 @@ def translate_document(
     target_lang: str,
     glossary_manager: GlossaryManager,
     model: str = settings.llm.model,
+    glossary_override: Optional[Dict[str, str]] = None,
 ) -> str:
     """
     Full pipeline:
@@ -327,6 +442,7 @@ def translate_document(
             glossary_terms=glossary_terms,
             previous_translated=previous_translated,
             model=model,
+            glossary_override=glossary_override,
         )
         translated_chunks.append(translated)
         previous_translated = translated
@@ -349,6 +465,10 @@ if __name__ == "__main__":
     parser.add_argument(
         "--glossary", default="glossary.csv", help="Path to glossary CSV file"
     )
+    parser.add_argument(
+        "--glossary-override",
+        help="Path to glossary override file (format: 'term = translation')",
+    )
     parser.add_argument("--output", default="translated.txt", help="Output file path")
     parser.add_argument(
         "--model", default=settings.llm.model, help="OpenRouter model string"
@@ -361,12 +481,22 @@ if __name__ == "__main__":
     gm = GlossaryManager()
     gm.load_glossary(args.glossary)
 
+    # Parse glossary override if provided
+    glossary_override = None
+    if args.glossary_override:
+        glossary_override = parse_glossary_override(args.glossary_override)
+        if glossary_override:
+            logger.info(
+                f"Loaded {len(glossary_override)} glossary override(s) from {args.glossary_override}"
+            )
+
     result = translate_document(
         text=text,
         source_lang=args.source_lang,
         target_lang=args.target_lang,
         glossary_manager=gm,
         model=args.model,
+        glossary_override=glossary_override,
     )
 
     with open(args.output, "w", encoding="utf-8") as f:

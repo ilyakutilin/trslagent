@@ -60,6 +60,35 @@ python src/translator.py document.txt English German \
     --model anthropic/claude-3.5-sonnet
 ```
 
+### Glossary override
+
+You can provide a glossary override file to use specific translations for certain terms in specific documents, overriding the embedded glossary.
+
+Create a text file (e.g., `override.txt`) with one term per line in the format:
+
+```
+AGREEMENT = ДОГОВОР
+contract = контракт
+party = сторона
+```
+
+- Lines starting with `#` are treated as comments
+- Blank lines are ignored
+- Format: `source_term = target_term`
+
+Use it with the `--glossary-override` flag:
+
+```bash
+python src/translator.py document.txt English German \
+    --glossary glossary.csv \
+    --glossary-override override.txt \
+    --output translated.txt
+```
+
+The override glossary takes priority over the embedded glossary. If a term appears in both, the override translation is used. If a term only appears in the override (and in the document), it's added to the prompt.
+
+This is useful when you have domain-specific documents where certain terms should be translated differently than in your main glossary (e.g., a contract from a different company project).
+
 ### In Python
 
 ```python
