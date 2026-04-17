@@ -104,17 +104,30 @@ def get_settings() -> Settings:
 
 
 def setup_logging() -> None:
-    """Configure loguru logger to output to stderr only."""
+    """Configure loguru logger with level-based output routing.
+
+    INFO and DEBUG messages go to stdout.
+    WARNING and above go to stderr.
+    """
     settings = get_settings()
 
     # Remove default handler
     logger.remove()
 
-    # Add stderr handler with configured format and level
+    # INFO and DEBUG to stdout
+    logger.add(
+        sys.stdout,
+        format=settings.logging.format,
+        level=settings.logging.level,
+        filter=lambda record: record["level"].name in ("DEBUG", "INFO"),
+        colorize=True,
+    )
+
+    # WARNING and above to stderr
     logger.add(
         sys.stderr,
         format=settings.logging.format,
-        level=settings.logging.level,
+        level="WARNING",
         colorize=True,
     )
 
