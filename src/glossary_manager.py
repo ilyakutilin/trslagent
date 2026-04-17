@@ -54,10 +54,13 @@ class GlossaryManager:
         """Load the embedding model once, reuse thereafter."""
         if self.model is None:
             logger.info(
-                f"Loading embedding model '{settings.glossary.embedding_model}' (first run downloads ~2GB)..."
+                f"Loading embedding model '{settings.glossary.embedding_model}' "
+                "(first run downloads ~2GB)..."
             )
             self.model = SentenceTransformer(settings.glossary.embedding_model)
-            logger.info("Model loaded.")
+            logger.info(
+                f"Embedding model '{settings.glossary.embedding_model}' is loaded."
+            )
         return self.model
 
     # ── ChromaDB setup ────────────────────────────────────────────────────────
@@ -72,6 +75,7 @@ class GlossaryManager:
                 name=settings.glossary.collection_name,
                 metadata={"hnsw:space": "cosine"},  # cosine similarity for text
             )
+            logger.info(f"ChromaDB collection '{self.collection.name}' is loaded.")
         return self.collection
 
     # ── Glossary loading & embedding ──────────────────────────────────────────
@@ -86,7 +90,8 @@ class GlossaryManager:
 
         if not force_reload and collection.count() > 0:
             logger.info(
-                f"Glossary already loaded ({collection.count()} entries). Skipping embed step."
+                f"Glossary already loaded ({collection.count()} entries). "
+                "Skipping embed step."
             )
             logger.info("Pass force_reload=True to re-embed from scratch.")
             self._load_terms_from_csv(csv_path)
@@ -254,6 +259,12 @@ class GlossaryManager:
 
             if len(terms) >= top_k:
                 break
+
+        # Log retrieval results
+        logger.info(f"Retrieved {len(terms)} glossary terms for chunk")
+        if terms:
+            pairs_log = "\n".join(f"  - {t['source']} → {t['target']}" for t in terms)
+            logger.debug(f"Glossary pairs:\n{pairs_log}")
 
         return terms
 
