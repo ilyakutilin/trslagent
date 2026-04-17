@@ -118,6 +118,7 @@ class GlossaryManager:
         # either language hits the right glossary entry.
         ids, embeddings, documents, metadatas = [], [], [], []
 
+        total_terms = len(self._terms)
         for i, term in enumerate(self._terms):
             src = term["source"]
             tgt = term["target"]
@@ -157,6 +158,17 @@ class GlossaryManager:
                     "canonical_target": canonical_tgt,
                 }
             )
+
+            logger.debug(
+                f"Embedding {i} of {total_terms}: {canonical_src} = {canonical_tgt}"
+            )
+            if settings.logging.level != "DEBUG":
+                # Progress logging - every 100 terms
+                if (i + 1) % 100 == 0 or (i + 1) == total_terms:
+                    progress_pct = ((i + 1) / total_terms) * 100
+                    logger.info(
+                        f"Embedding terms: {i + 1}/{total_terms} ({progress_pct:.1f}%)"
+                    )
 
         # Batch upsert (handles duplicates gracefully)
         BATCH = 500
