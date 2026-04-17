@@ -26,11 +26,6 @@ from src.config import get_settings, logger
 
 settings = get_settings()
 
-# Use centralized settings (can be overridden via environment variables)
-EMBEDDING_MODEL = settings.glossary.embedding_model
-CHROMA_DIR = settings.glossary.chroma_dir
-COLLECTION_NAME = settings.glossary.collection_name
-
 
 # ── Why multilingual-e5-large? ────────────────────────────────────────────────
 #
@@ -47,7 +42,7 @@ COLLECTION_NAME = settings.glossary.collection_name
 
 
 class GlossaryManager:
-    def __init__(self, chroma_dir: str = CHROMA_DIR):
+    def __init__(self, chroma_dir: str = settings.glossary.chroma_dir):
         self.chroma_dir = chroma_dir
         self.model: Optional[SentenceTransformer] = None
         self.collection = None
@@ -59,9 +54,9 @@ class GlossaryManager:
         """Load the embedding model once, reuse thereafter."""
         if self.model is None:
             logger.info(
-                f"Loading embedding model '{EMBEDDING_MODEL}' (first run downloads ~2GB)..."
+                f"Loading embedding model '{settings.glossary.embedding_model}' (first run downloads ~2GB)..."
             )
-            self.model = SentenceTransformer(EMBEDDING_MODEL)
+            self.model = SentenceTransformer(settings.glossary.embedding_model)
             logger.info("Model loaded.")
         return self.model
 
@@ -74,7 +69,7 @@ class GlossaryManager:
                 settings=Settings(anonymized_telemetry=False),
             )
             self.collection = client.get_or_create_collection(
-                name=COLLECTION_NAME,
+                name=settings.glossary.collection_name,
                 metadata={"hnsw:space": "cosine"},  # cosine similarity for text
             )
         return self.collection
@@ -273,6 +268,6 @@ class GlossaryManager:
             path=self.chroma_dir,
             settings=Settings(anonymized_telemetry=False),
         )
-        client.delete_collection(COLLECTION_NAME)
+        client.delete_collection(settings.glossary.collection_name)
         self.collection = None
         logger.info("Collection cleared.")

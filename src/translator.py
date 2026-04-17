@@ -26,8 +26,6 @@ from src.splitter import CHUNK_OVERLAP, split_text
 settings = get_settings()
 
 # Legacy constants for backward compatibility (deprecated, use settings object)
-OPENROUTER_API_KEY = settings.llm.api_key
-DEFAULT_MODEL = settings.llm.model
 GLOSSARY_TOP_K = settings.glossary.top_k
 
 
@@ -35,11 +33,11 @@ GLOSSARY_TOP_K = settings.glossary.top_k
 
 
 def get_llm_client() -> OpenAI:
-    if not OPENROUTER_API_KEY:
+    if not settings.llm.api_key:
         raise ValueError("Set the OPENROUTER_API_KEY environment variable.")
     return OpenAI(
         base_url="https://openrouter.ai/api/v1",
-        api_key=OPENROUTER_API_KEY,
+        api_key=settings.llm.api_key,
     )
 
 
@@ -132,7 +130,7 @@ def translate_chunk(
     target_lang: str,
     glossary_terms: list[dict],
     previous_translated: Optional[str],
-    model: str = DEFAULT_MODEL,
+    model: str = settings.llm.model,
 ) -> str:
     # Retry logic with exponential backoff for API errors
     max_retries = 5
@@ -294,7 +292,7 @@ def translate_document(
     source_lang: str,
     target_lang: str,
     glossary_manager: GlossaryManager,
-    model: str = DEFAULT_MODEL,
+    model: str = settings.llm.model,
 ) -> str:
     """
     Full pipeline:
@@ -321,7 +319,7 @@ def translate_document(
             query_text=chunk,
             source_lang=source_lang,
             target_lang=target_lang,
-            top_k=GLOSSARY_TOP_K,
+            top_k=settings.glossary.top_k,
         )
 
         translated = translate_chunk(
@@ -356,7 +354,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--output", default="translated.txt", help="Output file path")
     parser.add_argument(
-        "--model", default=DEFAULT_MODEL, help="OpenRouter model string"
+        "--model", default=settings.llm.model, help="OpenRouter model string"
     )
     args = parser.parse_args()
 
