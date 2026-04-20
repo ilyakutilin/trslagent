@@ -23,6 +23,7 @@ The first run will download the `multilingual-e5-large` model (~2GB). This is ca
 ## Glossary format
 
 A three-column file with a unique integer ID for each term pair. Header row is optional (auto-detected and skipped).
+File name is important as it will be used in the IDs in the DB. So you should keep the file name consistent when updating.
 
 Supported formats: **CSV** (`.csv`) and **XLSX** (`.xlsx`).
 
