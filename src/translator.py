@@ -478,6 +478,11 @@ if __name__ == "__main__":
         "--glossary-override",
         help="Path to glossary override file (format: 'term = translation')",
     )
+    parser.add_argument(
+        "--sync-glossary",
+        action="store_true",
+        help="Sync glossary (add/update/delete terms) instead of just loading",
+    )
     parser.add_argument("--output", default="translated.txt", help="Output file path")
     parser.add_argument(
         "--model", default=settings.llm.model, help="OpenRouter model string"
@@ -488,7 +493,7 @@ if __name__ == "__main__":
         text = f.read()
 
     gm = GlossaryManager()
-    gm.load_glossary(args.glossary)
+    gm.sync_glossary(args.glossary, sync_mode=args.sync_glossary)
 
     # Parse glossary override if provided
     glossary_override = None

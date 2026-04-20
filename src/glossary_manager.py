@@ -86,30 +86,23 @@ class GlossaryManager:
 
     # ── Glossary loading & embedding ──────────────────────────────────────────
 
-    def load_glossary(
-        self, glossary_source_path: str, force_reload: bool = False
-    ) -> None:
+    def sync_glossary(self, glossary_source_path: str, sync_mode: bool = False) -> None:
         """
-        Reads glossary CSV or XLSX and upserts all terms into ChromaDB.
-        On subsequent runs (chroma_db/ exists), skips re-embedding unless
-        force_reload=True — so the expensive embedding only happens once.
+        Reads glossary CSV or XLSX and syncs terms into ChromaDB.
+
+        When sync_mode=False (default):
+            - If DB is empty, loads and embeds all terms
+            - If DB has entries, just loads terms into memory (skips embedding)
+
+        When sync_mode=True:
+            - Treats the glossary source as the source of truth
+            - Adds new terms (IDs not in DB)
+            - Deletes removed terms (IDs in DB but not in source)
+            - Updates modified terms (same ID but different source/target)
         """
         collection = self._get_collection()
 
-        if not force_reload and collection.count() > 0:
-            logger.info(
-                f"Glossary already loaded ({collection.count()} entries). "
-                "Skipping embed step."
-            )
-            logger.info("Pass force_reload=True to re-embed from scratch.")
-            self._load_terms_from_file(glossary_source_path)
-            return
-
-        if force_reload:
-            logger.info("Clearing existing ChromaDB collection...")
-            self.clear()
-
-        logger.info(f"Loading glossary from {glossary_source_path}...")
+        # Load terms from file first (needed for both modes)
         self._load_terms_from_file(glossary_source_path)
 
         if not self._terms:
@@ -118,20 +111,113 @@ class GlossaryManager:
         # Validate IDs before proceeding
         self._validate_ids()
 
-        model = self._get_model()
+        # If sync not requested and DB has entries, just return after loading terms
+        if not sync_mode and collection.count() > 0:
+            logger.info(
+                f"Glossary already loaded ({collection.count()} entries). "
+                "Skipping sync step. Pass sync_mode=True to sync."
+            )
+            return
 
-        # We embed BOTH directions as separate documents so that a query in
-        # either language hits the right glossary entry.
+        # Get current state
+        source_ids = {term["id"] for term in self._terms}
+        db_ids = self._get_existing_db_ids()
+
+        # Determine what needs to be added, deleted, or updated
+        new_ids = source_ids - db_ids
+        deleted_ids = db_ids - source_ids
+        common_ids = source_ids & db_ids
+
+        # Check for modified terms among common IDs
+        modified_ids = self._get_modified_ids(common_ids)
+
+        # Perform sync operations
+        if new_ids:
+            logger.info(f"Adding {len(new_ids)} new term(s) to glossary...")
+            self._sync_add_terms(new_ids)
+
+        if deleted_ids:
+            logger.info(f"Deleting {len(deleted_ids)} term(s) from glossary...")
+            self._sync_delete_terms(deleted_ids)
+
+        if modified_ids:
+            logger.info(f"Updating {len(modified_ids)} modified term(s)...")
+            self._sync_update_terms(modified_ids)
+
+        # If DB was empty, embed everything
+        if not db_ids:
+            logger.info(f"Loading glossary from {glossary_source_path}...")
+            self._embed_all_terms()
+
+        logger.info(
+            f"Glossary sync complete. Total entries in DB: {collection.count()}"
+        )
+
+    def _get_existing_db_ids(self) -> set[int]:
+        """Extract all term IDs currently in the ChromaDB collection."""
+        collection = self._get_collection()
+        result = collection.get(include=[])
+        ids = (result or {}).get("ids", [])
+
+        # Parse IDs like "fwd_123" or "rev_123" to extract integer ID
+        term_ids = set()
+        for entry_id in ids:
+            # IDs are formatted as "fwd_{id}" or "rev_{id}"
+            if entry_id.startswith("fwd_") or entry_id.startswith("rev_"):
+                try:
+                    term_id = int(entry_id.split("_", 1)[1])
+                    term_ids.add(term_id)
+                except (ValueError, IndexError):
+                    continue
+
+        return term_ids
+
+    def _get_modified_ids(self, common_ids: set[int]) -> list[int]:
+        """Find IDs where source or target terms have changed."""
+        # Build lookup from DB metadata
+        collection = self._get_collection()
+        modified_ids = []
+
+        # Get metadata for all fwd entries (we only need one direction to check)
+        result = collection.get(where={"direction": "fwd"}, include=["metadatas"])
+        all_metadata = (result or {}).get("metadatas") or []
+
+        # Build dict of id -> (source, target)
+        db_terms = {}
+        for meta in all_metadata:
+            term_id = meta.get("id")
+            if term_id is not None:
+                db_terms[term_id] = (meta.get("source"), meta.get("target"))
+
+        # Build lookup from loaded terms
+        source_terms = {
+            term["id"]: (term["source"], term["target"]) for term in self._terms
+        }
+
+        # Compare
+        for term_id in common_ids:
+            if term_id in db_terms and term_id in source_terms:
+                db_src, db_tgt = db_terms[term_id]
+                src_src, src_tgt = source_terms[term_id]
+                if db_src != src_src or db_tgt != src_tgt:
+                    modified_ids.append(term_id)
+
+        return modified_ids
+
+    def _sync_add_terms(self, term_ids: set[int]) -> None:
+        """Add embeddings for new term IDs."""
+        model = self._get_model()
+        collection = self._get_collection()
+
+        # Filter terms to only those with IDs in term_ids
+        new_terms = [term for term in self._terms if term["id"] in term_ids]
+
         ids, embeddings, documents, metadatas = [], [], [], []
 
-        total_terms = len(self._terms)
-        for term in self._terms:
+        for term in new_terms:
             term_id = term["id"]
             src = term["source"]
             tgt = term["target"]
-
-            # Store canonical pair (first term is always canonical_source, second is canonical_target)
-            # This allows us to normalize the direction in retrieval
             canonical_src, canonical_tgt = sorted([src, tgt])
 
             # Forward entry (source → target)
@@ -147,6 +233,7 @@ class GlossaryManager:
                     "direction": "fwd",
                     "canonical_source": canonical_src,
                     "canonical_target": canonical_tgt,
+                    "id": term_id,
                 }
             )
 
@@ -163,12 +250,91 @@ class GlossaryManager:
                     "direction": "rev",
                     "canonical_source": canonical_src,
                     "canonical_target": canonical_tgt,
+                    "id": term_id,
+                }
+            )
+
+        # Batch upsert
+        BATCH = 500
+        for start in range(0, len(ids), BATCH):
+            collection.upsert(
+                ids=ids[start : start + BATCH],
+                embeddings=embeddings[start : start + BATCH],
+                documents=documents[start : start + BATCH],
+                metadatas=metadatas[start : start + BATCH],
+            )
+
+        logger.info(f"  Added {len(new_terms)} new term(s) to glossary.")
+
+    def _sync_delete_terms(self, term_ids: set[int]) -> None:
+        """Delete embeddings for removed term IDs."""
+        collection = self._get_collection()
+
+        ids_to_delete = []
+        for term_id in term_ids:
+            ids_to_delete.append(f"fwd_{term_id}")
+            ids_to_delete.append(f"rev_{term_id}")
+
+        collection.delete(ids=ids_to_delete)
+        logger.info(f"  Deleted {len(term_ids)} term(s) from glossary.")
+
+    def _sync_update_terms(self, term_ids: list[int]) -> None:
+        """Update embeddings for modified term IDs."""
+        # Delete old entries
+        self._sync_delete_terms(set(term_ids))
+        # Add new entries
+        self._sync_add_terms(set(term_ids))
+
+    def _embed_all_terms(self) -> None:
+        """Embed all terms from self._terms and upsert into DB."""
+        model = self._get_model()
+        collection = self._get_collection()
+
+        ids, embeddings, documents, metadatas = [], [], [], []
+
+        total_terms = len(self._terms)
+        for term in self._terms:
+            term_id = term["id"]
+            src = term["source"]
+            tgt = term["target"]
+            canonical_src, canonical_tgt = sorted([src, tgt])
+
+            # Forward entry (source → target)
+            fwd_text = f"passage: {src}"
+            fwd_embedding = model.encode(fwd_text, normalize_embeddings=True).tolist()
+            ids.append(f"fwd_{term_id}")
+            embeddings.append(fwd_embedding)
+            documents.append(src)
+            metadatas.append(
+                {
+                    "source": src,
+                    "target": tgt,
+                    "direction": "fwd",
+                    "canonical_source": canonical_src,
+                    "canonical_target": canonical_tgt,
+                    "id": term_id,
+                }
+            )
+
+            # Reverse entry (target → source) — same pair, but queryable from target lang
+            rev_text = f"passage: {tgt}"
+            rev_embedding = model.encode(rev_text, normalize_embeddings=True).tolist()
+            ids.append(f"rev_{term_id}")
+            embeddings.append(rev_embedding)
+            documents.append(tgt)
+            metadatas.append(
+                {
+                    "source": tgt,
+                    "target": src,
+                    "direction": "rev",
+                    "canonical_source": canonical_src,
+                    "canonical_target": canonical_tgt,
+                    "id": term_id,
                 }
             )
 
             logger.debug(f"Embedding term {term_id}: {canonical_src} = {canonical_tgt}")
             if settings.log.level != "DEBUG":
-                # Progress logging - every 100 terms (200 embeddings)
                 if len(ids) % 200 == 0 or len(ids) == total_terms * 2:
                     progress = len(ids) // 2
                     progress_pct = (progress / total_terms) * 100
@@ -176,7 +342,7 @@ class GlossaryManager:
                         f"Embedding terms: {progress}/{total_terms} ({progress_pct:.1f}%)"
                     )
 
-        # Batch upsert (handles duplicates gracefully)
+        # Batch upsert
         BATCH = 500
         for start in range(0, len(ids), BATCH):
             collection.upsert(
@@ -188,10 +354,6 @@ class GlossaryManager:
             logger.info(
                 f"  Upserted {min(start + BATCH, len(ids))}/{len(ids)} entries..."
             )
-
-        logger.info(
-            f"Glossary embedded and stored. Total entries in DB: {collection.count()}"
-        )
 
     def _validate_ids(self) -> None:
         """Validate that all term IDs are unique integers."""
