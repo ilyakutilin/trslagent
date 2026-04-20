@@ -69,6 +69,10 @@ class GlossarySettings(BaseSettings):
     collection_name: str = Field(
         default="glossary", description="ChromaDB collection name"
     )
+    embed_batch_size: int = Field(
+        default=100,
+        description="Number of terms to embed and upsert in each batch (smaller = more frequent saves)",
+    )
 
 
 class Settings(BaseSettings):

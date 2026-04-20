@@ -205,73 +205,96 @@ class GlossaryManager:
         return modified_ids
 
     def _embed_and_upsert_terms(self, terms: list[dict]) -> None:
-        """Embed terms and upsert into ChromaDB. Handles both forward and reverse entries."""
+        """Embed terms and upsert into ChromaDB. Handles both forward and reverse entries.
+
+        Processes terms in batches to avoid losing all progress if something fails.
+        Each batch is embedded and upserted immediately, so partial progress is preserved.
+        """
         model = self._get_model()
         collection = self._get_collection()
 
-        ids, embeddings, documents, metadatas = [], [], [], []
-
         total_terms = len(terms)
-        for term in terms:
-            term_id = term["id"]
-            src = term["source"]
-            tgt = term["target"]
-            canonical_src, canonical_tgt = sorted([src, tgt])
+        batch_size = settings.glossary.embed_batch_size
+        total_entries = total_terms * 2  # Each term produces 2 entries (fwd + rev)
 
-            # Forward entry (source → target)
-            fwd_text = f"passage: {src}"
-            fwd_embedding = model.encode(fwd_text, normalize_embeddings=True).tolist()
-            ids.append(f"fwd_{term_id}")
-            embeddings.append(fwd_embedding)
-            documents.append(src)
-            metadatas.append(
-                {
-                    "source": src,
-                    "target": tgt,
-                    "direction": "fwd",
-                    "canonical_source": canonical_src,
-                    "canonical_target": canonical_tgt,
-                    "id": term_id,
-                }
-            )
+        # Track cumulative progress
+        entries_processed = 0
 
-            # Reverse entry (target → source) — same pair, but queryable from target lang
-            rev_text = f"passage: {tgt}"
-            rev_embedding = model.encode(rev_text, normalize_embeddings=True).tolist()
-            ids.append(f"rev_{term_id}")
-            embeddings.append(rev_embedding)
-            documents.append(tgt)
-            metadatas.append(
-                {
-                    "source": tgt,
-                    "target": src,
-                    "direction": "rev",
-                    "canonical_source": canonical_src,
-                    "canonical_target": canonical_tgt,
-                    "id": term_id,
-                }
-            )
+        # Process terms in batches
+        for batch_start in range(0, total_terms, batch_size):
+            batch_end = min(batch_start + batch_size, total_terms)
+            batch = terms[batch_start:batch_end]
 
-            logger.debug(f"Embedding term {term_id}: {canonical_src} = {canonical_tgt}")
-            if settings.log.level != "DEBUG":
-                if len(ids) % 200 == 0 or len(ids) == total_terms * 2:
-                    progress = len(ids) // 2
-                    progress_pct = (progress / total_terms) * 100
-                    logger.info(
-                        f"Embedding terms: {progress}/{total_terms} ({progress_pct:.1f}%)"
-                    )
+            ids, embeddings, documents, metadatas = [], [], [], []
 
-        # Batch upsert
-        BATCH = 500
-        for start in range(0, len(ids), BATCH):
-            collection.upsert(
-                ids=ids[start : start + BATCH],
-                embeddings=embeddings[start : start + BATCH],
-                documents=documents[start : start + BATCH],
-                metadatas=metadatas[start : start + BATCH],
-            )
+            for term in batch:
+                term_id = term["id"]
+                src = term["source"]
+                tgt = term["target"]
+                canonical_src, canonical_tgt = sorted([src, tgt])
+
+                # Forward entry (source → target)
+                fwd_text = f"passage: {src}"
+                fwd_embedding = model.encode(
+                    fwd_text, normalize_embeddings=True
+                ).tolist()
+                ids.append(f"fwd_{term_id}")
+                embeddings.append(fwd_embedding)
+                documents.append(src)
+                metadatas.append(
+                    {
+                        "source": src,
+                        "target": tgt,
+                        "direction": "fwd",
+                        "canonical_source": canonical_src,
+                        "canonical_target": canonical_tgt,
+                        "id": term_id,
+                    }
+                )
+
+                # Reverse entry (target → source) — same pair, but queryable from target lang
+                rev_text = f"passage: {tgt}"
+                rev_embedding = model.encode(
+                    rev_text, normalize_embeddings=True
+                ).tolist()
+                ids.append(f"rev_{term_id}")
+                embeddings.append(rev_embedding)
+                documents.append(tgt)
+                metadatas.append(
+                    {
+                        "source": tgt,
+                        "target": src,
+                        "direction": "rev",
+                        "canonical_source": canonical_src,
+                        "canonical_target": canonical_tgt,
+                        "id": term_id,
+                    }
+                )
+
+                logger.debug(
+                    f"Embedding term {term_id}: {canonical_src} = {canonical_tgt}"
+                )
+
+            # Upsert this batch immediately
+            try:
+                collection.upsert(
+                    ids=ids,
+                    embeddings=embeddings,
+                    documents=documents,
+                    metadatas=metadatas,
+                )
+            except Exception as e:
+                entries_so_far = entries_processed
+                raise RuntimeError(
+                    f"Failed to upsert batch starting at term index {batch_start}. "
+                    f"Entries processed before failure: {entries_so_far}/{total_entries}"
+                ) from e
+
+            # Update cumulative progress
+            entries_processed += len(ids)
+            progress_pct = (entries_processed / total_entries) * 100
             logger.info(
-                f"  Upserted {min(start + BATCH, len(ids))}/{len(ids)} entries..."
+                f"  Upserted {entries_processed}/{total_entries} entries ({progress_pct:.1f}%)..."
             )
 
     def _sync_add_terms(self, term_ids: set[int]) -> None:
