@@ -22,11 +22,11 @@ import os
 from typing import Optional
 from xml.etree import ElementTree as ET
 
-import chromadb
 from chromadb.config import Settings
 from openpyxl import load_workbook
 from sentence_transformers import SentenceTransformer
 
+import chromadb
 from src.config import get_settings, logger
 
 # ── Configuration ─────────────────────────────────────────────────────────────
@@ -126,11 +126,18 @@ class GlossaryManager:
 
         # Determine what needs to be added, deleted, or updated
         new_ids = source_ids - db_ids
+        logger.info(f"Found {len(new_ids)} new ID{'s' if len(new_ids) > 1 else ''}")
         deleted_ids = db_ids - source_ids
+        logger.info(
+            f"Detected {len(deleted_ids)} deleted ID{'s' if len(new_ids) > 1 else ''}"
+        )
         common_ids = source_ids & db_ids
 
         # Check for modified terms among common IDs
         modified_ids = self._get_modified_ids(common_ids)
+        logger.info(
+            f"Detected {len(modified_ids)} modified ID{'s' if len(new_ids) > 1 else ''}"
+        )
 
         # Perform sync operations
         if new_ids:
@@ -160,13 +167,13 @@ class GlossaryManager:
         result = collection.get(include=[])
         ids = (result or {}).get("ids", [])
 
-        # Parse IDs like "fwd_123" or "rev_123" to extract integer ID
+        # Parse IDs like "fwd_abc123" or "rev_abc123" to extract ID
         term_ids = set()
         for entry_id in ids:
             # IDs are formatted as "fwd_{id}" or "rev_{id}"
             if entry_id.startswith("fwd_") or entry_id.startswith("rev_"):
                 try:
-                    term_id = int(entry_id.split("_", 1)[1])
+                    term_id = entry_id.split("_", 1)[1]
                     term_ids.add(term_id)
                 except (ValueError, IndexError):
                     continue
