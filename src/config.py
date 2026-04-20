@@ -63,6 +63,10 @@ class GlossarySettings(BaseSettings):
         default="intfloat/multilingual-e5-large",
         description="Sentence transformer model for embeddings",
     )
+    hf_token: str | None = Field(
+        default=None,
+        description="Optional HuggingFace token for faster downloads and to avoid rate limiting",
+    )
     chroma_dir: str = Field(
         default="./chromadb", description="Directory for ChromaDB persistence"
     )

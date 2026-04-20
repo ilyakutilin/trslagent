@@ -17,10 +17,12 @@ Glossary file format (no header required, but header is fine):
 The glossary is bidirectional: querying in either language will find the entry.
 """
 
+import os
 from typing import Optional
 
 import transformers
 from chromadb.config import Settings
+from huggingface_hub import _CACHED_NO_EXIST, try_to_load_from_cache
 from sentence_transformers import SentenceTransformer
 
 import chromadb
@@ -55,14 +57,34 @@ class GlossaryManager:
 
     # ── Lazy model loading ────────────────────────────────────────────────────
 
+    def _is_model_cached(self) -> bool:
+        repo_id = settings.glossary.embedding_model
+
+        # Check for the main weights file — if this is cached, the model is local
+        result = try_to_load_from_cache(repo_id, filename="pytorch_model.bin")
+
+        # Newer models use sharded safetensors instead
+        if result is None or result is _CACHED_NO_EXIST:
+            result = try_to_load_from_cache(repo_id, filename="model.safetensors")
+
+        return result is not None and result is not _CACHED_NO_EXIST
+
     def _get_model(self) -> SentenceTransformer:
         """Load the embedding model once, reuse thereafter."""
         if self.model is None:
             logger.info(
-                f"Loading embedding model '{settings.glossary.embedding_model}' "
-                "(first run downloads ~2GB)..."
+                f"Loading embedding model '{settings.glossary.embedding_model}'..."
             )
             transformers.logging.set_verbosity_error()
+
+            if not self._is_model_cached():
+                logger.warning(
+                    "First run: about 2 GB of data will be downloaded from Huggingface"
+                )
+
+            if settings.glossary.hf_token is not None:
+                os.environ["HF_TOKEN"] = settings.glossary.hf_token
+
             self.model = SentenceTransformer(settings.glossary.embedding_model)
             logger.info(
                 f"Embedding model '{settings.glossary.embedding_model}' is loaded."
