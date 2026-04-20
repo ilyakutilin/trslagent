@@ -64,7 +64,7 @@ class GlossarySettings(BaseSettings):
         description="Sentence transformer model for embeddings",
     )
     chroma_dir: str = Field(
-        default="./chroma_db", description="Directory for ChromaDB persistence"
+        default="./chromadb", description="Directory for ChromaDB persistence"
     )
     collection_name: str = Field(
         default="glossary", description="ChromaDB collection name"
