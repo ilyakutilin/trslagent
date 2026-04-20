@@ -204,96 +204,15 @@ class GlossaryManager:
 
         return modified_ids
 
-    def _sync_add_terms(self, term_ids: set[int]) -> None:
-        """Add embeddings for new term IDs."""
-        model = self._get_model()
-        collection = self._get_collection()
-
-        # Filter terms to only those with IDs in term_ids
-        new_terms = [term for term in self._terms if term["id"] in term_ids]
-
-        ids, embeddings, documents, metadatas = [], [], [], []
-
-        for term in new_terms:
-            term_id = term["id"]
-            src = term["source"]
-            tgt = term["target"]
-            canonical_src, canonical_tgt = sorted([src, tgt])
-
-            # Forward entry (source → target)
-            fwd_text = f"passage: {src}"
-            fwd_embedding = model.encode(fwd_text, normalize_embeddings=True).tolist()
-            ids.append(f"fwd_{term_id}")
-            embeddings.append(fwd_embedding)
-            documents.append(src)
-            metadatas.append(
-                {
-                    "source": src,
-                    "target": tgt,
-                    "direction": "fwd",
-                    "canonical_source": canonical_src,
-                    "canonical_target": canonical_tgt,
-                    "id": term_id,
-                }
-            )
-
-            # Reverse entry (target → source) — same pair, but queryable from target lang
-            rev_text = f"passage: {tgt}"
-            rev_embedding = model.encode(rev_text, normalize_embeddings=True).tolist()
-            ids.append(f"rev_{term_id}")
-            embeddings.append(rev_embedding)
-            documents.append(tgt)
-            metadatas.append(
-                {
-                    "source": tgt,
-                    "target": src,
-                    "direction": "rev",
-                    "canonical_source": canonical_src,
-                    "canonical_target": canonical_tgt,
-                    "id": term_id,
-                }
-            )
-
-        # Batch upsert
-        BATCH = 500
-        for start in range(0, len(ids), BATCH):
-            collection.upsert(
-                ids=ids[start : start + BATCH],
-                embeddings=embeddings[start : start + BATCH],
-                documents=documents[start : start + BATCH],
-                metadatas=metadatas[start : start + BATCH],
-            )
-
-        logger.info(f"  Added {len(new_terms)} new term(s) to glossary.")
-
-    def _sync_delete_terms(self, term_ids: set[int]) -> None:
-        """Delete embeddings for removed term IDs."""
-        collection = self._get_collection()
-
-        ids_to_delete = []
-        for term_id in term_ids:
-            ids_to_delete.append(f"fwd_{term_id}")
-            ids_to_delete.append(f"rev_{term_id}")
-
-        collection.delete(ids=ids_to_delete)
-        logger.info(f"  Deleted {len(term_ids)} term(s) from glossary.")
-
-    def _sync_update_terms(self, term_ids: list[int]) -> None:
-        """Update embeddings for modified term IDs."""
-        # Delete old entries
-        self._sync_delete_terms(set(term_ids))
-        # Add new entries
-        self._sync_add_terms(set(term_ids))
-
-    def _embed_all_terms(self) -> None:
-        """Embed all terms from self._terms and upsert into DB."""
+    def _embed_and_upsert_terms(self, terms: list[dict]) -> None:
+        """Embed terms and upsert into ChromaDB. Handles both forward and reverse entries."""
         model = self._get_model()
         collection = self._get_collection()
 
         ids, embeddings, documents, metadatas = [], [], [], []
 
-        total_terms = len(self._terms)
-        for term in self._terms:
+        total_terms = len(terms)
+        for term in terms:
             term_id = term["id"]
             src = term["source"]
             tgt = term["target"]
@@ -354,6 +273,36 @@ class GlossaryManager:
             logger.info(
                 f"  Upserted {min(start + BATCH, len(ids))}/{len(ids)} entries..."
             )
+
+    def _sync_add_terms(self, term_ids: set[int]) -> None:
+        """Add embeddings for new term IDs."""
+        # Filter terms to only those with IDs in term_ids
+        new_terms = [term for term in self._terms if term["id"] in term_ids]
+        self._embed_and_upsert_terms(new_terms)
+        logger.info(f"  Added {len(new_terms)} new term(s) to glossary.")
+
+    def _sync_delete_terms(self, term_ids: set[int]) -> None:
+        """Delete embeddings for removed term IDs."""
+        collection = self._get_collection()
+
+        ids_to_delete = []
+        for term_id in term_ids:
+            ids_to_delete.append(f"fwd_{term_id}")
+            ids_to_delete.append(f"rev_{term_id}")
+
+        collection.delete(ids=ids_to_delete)
+        logger.info(f"  Deleted {len(term_ids)} term(s) from glossary.")
+
+    def _sync_update_terms(self, term_ids: list[int]) -> None:
+        """Update embeddings for modified term IDs."""
+        # Delete old entries
+        self._sync_delete_terms(set(term_ids))
+        # Add new entries
+        self._sync_add_terms(set(term_ids))
+
+    def _embed_all_terms(self) -> None:
+        """Embed all terms from self._terms and upsert into DB."""
+        self._embed_and_upsert_terms(self._terms)
 
     def _validate_ids(self) -> None:
         """Validate that all term IDs are unique integers."""
