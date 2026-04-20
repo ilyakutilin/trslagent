@@ -547,12 +547,17 @@ if __name__ == "__main__":
         action="store_true",
         help="Only print the prompts that would be sent to the LLM without actually calling it",
     )
+    parser.add_argument(
+        "--remote-embedding-model",
+        action="store_true",
+        help="Use remote embedding model (OpenRouter) instead of local",
+    )
     args = parser.parse_args()
 
     with open(args.input_file, "r", encoding="utf-8") as f:
         text = f.read()
 
-    gm = GlossaryManager()
+    gm = GlossaryManager(remote_embedding=args.remote_embedding_model)
     gm.sync_glossary(args.glossary, sync_mode=args.sync_glossary)
 
     # Parse glossary override if provided

@@ -7,7 +7,7 @@ via environment variables or .env file.
 """
 
 import sys
-from typing import Literal
+from typing import Literal, Optional
 
 from loguru import logger
 from pydantic import Field
@@ -62,6 +62,10 @@ class GlossarySettings(BaseSettings):
     embedding_model: str = Field(
         default="intfloat/multilingual-e5-large",
         description="Sentence transformer model for embeddings",
+    )
+    remote_embedding_model: Optional[str] = Field(
+        default=None,
+        description="OpenRouter model for embeddings (if None, uses local embedding model)",
     )
     chroma_dir: str = Field(
         default="./chromadb", description="Directory for ChromaDB persistence"

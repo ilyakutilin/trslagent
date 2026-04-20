@@ -24,9 +24,9 @@ from typing import Optional
 import chromadb
 from chromadb.config import Settings
 from openpyxl import load_workbook
-from sentence_transformers import SentenceTransformer
 
 from src.config import get_settings, logger
+from src.embedding import EmbeddingModel
 
 # ── Configuration ─────────────────────────────────────────────────────────────
 
@@ -48,26 +48,32 @@ settings = get_settings()
 
 
 class GlossaryManager:
-    def __init__(self, chroma_dir: str = settings.glossary.chroma_dir):
+    def __init__(
+        self,
+        chroma_dir: str = settings.glossary.chroma_dir,
+        remote_embedding: bool = False,
+    ):
         self.chroma_dir = chroma_dir
-        self.model: Optional[SentenceTransformer] = None
+        self.embedding_model: Optional[EmbeddingModel] = None
         self.collection = None
         self._terms: list[dict] = []  # in-memory copy for quick lookup by id
+        self._remote_embedding = remote_embedding
 
-    # ── Lazy model loading ────────────────────────────────────────────────────
+    # ── Lazy embedding model loading ──────────────────────────────────────────
 
-    def _get_model(self) -> SentenceTransformer:
-        """Load the embedding model once, reuse thereafter."""
-        if self.model is None:
+    def _get_embedding_model(self) -> EmbeddingModel:
+        """Get or create the embedding model (local or remote based on config)."""
+        if self.embedding_model is None:
             logger.info(
-                f"Loading embedding model '{settings.glossary.embedding_model}' "
-                "(first run downloads ~2GB)..."
+                f"Initializing {'remote' if self._remote_embedding else 'local'} "
+                f"embedding model '{settings.glossary.embedding_model}'..."
             )
-            self.model = SentenceTransformer(settings.glossary.embedding_model)
+            self.embedding_model = EmbeddingModel(remote=self._remote_embedding)
             logger.info(
-                f"Embedding model '{settings.glossary.embedding_model}' is loaded."
+                f"Embedding model '{settings.glossary.embedding_model}' "
+                f"({'remote' if self._remote_embedding else 'local'}) is loaded."
             )
-        return self.model
+        return self.embedding_model
 
     # ── ChromaDB setup ────────────────────────────────────────────────────────
 
@@ -210,7 +216,7 @@ class GlossaryManager:
         Processes terms in batches to avoid losing all progress if something fails.
         Each batch is embedded and upserted immediately, so partial progress is preserved.
         """
-        model = self._get_model()
+        model = self._get_embedding_model()
         collection = self._get_collection()
 
         total_terms = len(terms)
@@ -447,7 +453,7 @@ class GlossaryManager:
         The returned dicts always have source=source_lang term, target=target_lang term
         regardless of which direction the DB entry was stored in.
         """
-        model = self._get_model()
+        model = self._get_embedding_model()
         collection = self._get_collection()
 
         if collection.count() == 0:
@@ -525,7 +531,10 @@ class GlossaryManager:
             settings=Settings(anonymized_telemetry=False),
         )
         client.delete_collection(settings.glossary.collection_name)
-        self.collection = None
+        self.collection = client.get_or_create_collection(
+            name=settings.glossary.collection_name,
+            metadata={"hnsw:space": "cosine"},
+        )
         logger.info("Collection cleared.")
 
 
@@ -544,11 +553,16 @@ if __name__ == "__main__":
         default="glossary.csv",
         help="Path to glossary CSV or XLSX file",
     )
+    sync_parser.add_argument(
+        "--remote-embedding-model",
+        action="store_true",
+        help="Use remote embedding model (OpenRouter) instead of local",
+    )
 
     args = parser.parse_args()
 
     if args.command == "sync":
-        gm = GlossaryManager()
+        gm = GlossaryManager(remote_embedding=args.remote_embedding_model)
         gm.sync_glossary(args.glossary, sync_mode=True)
     else:
         parser.print_help()
