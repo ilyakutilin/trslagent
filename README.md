@@ -54,6 +54,12 @@ An Excel spreadsheet with three columns:
 | 2   | force majeure           | höhere Gewalt           |
 | 3   | party of the first part | Partei des ersten Teils |
 
+### XML
+
+XML file can be obtained by exporting from Multiterm with the default settings. No further converting is required.
+
+==========
+
 The glossary is **bidirectional** — you only need each pair once. The system embeds both directions so queries from either language find the right entry.
 
 ---
