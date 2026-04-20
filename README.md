@@ -61,6 +61,8 @@ The glossary is **bidirectional** — you only need each pair once. The system e
 
 ### Command line
 
+#### translator.py
+
 ```bash
 python src/translator.py document.txt English German \
     --glossary glossary.csv \
@@ -68,7 +70,26 @@ python src/translator.py document.txt English German \
     --model anthropic/claude-3.5-sonnet
 ```
 
-### Glossary override
+**Positional arguments:**
+
+| Argument      | Description                        |
+| ------------- | ---------------------------------- |
+| `input_file`  | Path to the text file to translate |
+| `source_lang` | Source language (e.g., 'English')  |
+| `target_lang` | Target language (e.g., 'German')   |
+
+**Optional arguments:**
+
+| Argument              | Description                                                             |
+| --------------------- | ----------------------------------------------------------------------- |
+| `--glossary`          | Path to glossary CSV or XLSX file (default: `glossary.csv`)             |
+| `--glossary-override` | Path to glossary override file (format: `term = translation`)           |
+| `--sync-glossary`     | Sync glossary (add/update/delete terms) instead of just loading         |
+| `--output`            | Output file path (default: `translated.txt`)                            |
+| `--model`             | OpenRouter model string (default: configured in `.env`)                 |
+| `--print-prompt-only` | Print prompts that would be sent to the LLM without actually calling it |
+
+**Glossary override:**
 
 You can provide a glossary override file to use specific translations for certain terms in specific documents, overriding the embedded glossary.
 
@@ -96,6 +117,26 @@ python src/translator.py document.txt English German \
 The override glossary takes priority over the embedded glossary. If a term appears in both, the override translation is used. If a term only appears in the override (and in the document), it's added to the prompt.
 
 This is useful when you have domain-specific documents where certain terms should be translated differently than in your main glossary (e.g., a contract from a different company project).
+
+#### glossary_manager.py
+
+```bash
+python src/glossary_manager.py sync --glossary glossary.csv
+```
+
+**Subcommands:**
+
+| Command | Description                                           |
+| ------- | ----------------------------------------------------- |
+| `sync`  | Sync glossary with ChromaDB (add/update/delete terms) |
+
+**Arguments:**
+
+| Argument     | Description                                                 |
+| ------------ | ----------------------------------------------------------- |
+| `--glossary` | Path to glossary CSV or XLSX file (default: `glossary.csv`) |
+
+---
 
 ### In Python
 
@@ -179,10 +220,6 @@ A lighter alternative is `intfloat/multilingual-e5-small` (~120MB vs ~2GB) — g
 
 ## Tips
 
-- **Force re-embed** the glossary after updating the CSV:
-  ```python
-  gm.load_glossary("glossary.csv", force_reload=True)
-  ```
 - **Lower temperature** (`0.1`) in the config gives more consistent, literal output — appropriate for technical/legal documents.
 - **Chunk size tuning**: larger chunks = more context per prompt = better translation quality, but higher cost. Start with 6000 characters and adjust.
 - **OpenRouter model strings**: find them at https://openrouter.ai/models
