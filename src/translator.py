@@ -407,6 +407,61 @@ def _truncate_at_sentence_boundary(text: str, window: int = 400) -> str:
 # ── Main entry point ──────────────────────────────────────────────────────────
 
 
+def print_prompts_only(
+    text: str,
+    source_lang: str,
+    target_lang: str,
+    glossary_manager: GlossaryManager,
+    model: str = settings.llm.model,
+    glossary_override: Optional[Dict[str, str]] = None,
+) -> None:
+    """
+    Print prompts that would be sent to the LLM without actually calling the API.
+    Useful for debugging and inspecting what would be sent.
+    """
+    # Step 1: Split
+    chunks = split_text(text)
+
+    logger.info(f"Split into {len(chunks)} chunks.")
+
+    # Step 2: Build prompts for each chunk
+    previous_translated = None
+
+    for i, chunk in enumerate(chunks):
+        logger.info(f"Building prompts for chunk {i + 1}/{len(chunks)}...")
+
+        # Retrieve relevant glossary terms for this chunk
+        glossary_terms = glossary_manager.retrieve(
+            query_text=chunk,
+            source_lang=source_lang,
+            target_lang=target_lang,
+            top_k=settings.glossary.top_k,
+        )
+
+        # Build prompts
+        system_prompt = build_system_prompt(source_lang, target_lang)
+        user_prompt = build_user_prompt(
+            chunk,
+            source_lang,
+            target_lang,
+            glossary_terms,
+            previous_translated,
+            glossary_override,
+        )
+
+        # Print prompts
+        print(f"\n{'=' * 60}")
+        print(f"=== CHUNK {i + 1} ===")
+        print(f"{'=' * 60}")
+        print(f"\n--- SYSTEM PROMPT ---\n{system_prompt}")
+        print(f"\n--- USER PROMPT ---\n{user_prompt}")
+
+        # Update previous_translated for next chunk context
+        previous_translated = user_prompt
+
+    logger.info(f"Printed prompts for {len(chunks)} chunks.")
+
+
 def translate_document(
     text: str,
     source_lang: str,
@@ -487,6 +542,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--model", default=settings.llm.model, help="OpenRouter model string"
     )
+    parser.add_argument(
+        "--print-prompt-only",
+        action="store_true",
+        help="Only print the prompts that would be sent to the LLM without actually calling it",
+    )
     args = parser.parse_args()
 
     with open(args.input_file, "r", encoding="utf-8") as f:
@@ -504,16 +564,26 @@ if __name__ == "__main__":
                 f"Loaded {len(glossary_override)} glossary override(s) from {args.glossary_override}"
             )
 
-    result = translate_document(
-        text=text,
-        source_lang=args.source_lang,
-        target_lang=args.target_lang,
-        glossary_manager=gm,
-        model=args.model,
-        glossary_override=glossary_override,
-    )
+    if args.print_prompt_only:
+        print_prompts_only(
+            text=text,
+            source_lang=args.source_lang,
+            target_lang=args.target_lang,
+            glossary_manager=gm,
+            model=args.model,
+            glossary_override=glossary_override,
+        )
+    else:
+        result = translate_document(
+            text=text,
+            source_lang=args.source_lang,
+            target_lang=args.target_lang,
+            glossary_manager=gm,
+            model=args.model,
+            glossary_override=glossary_override,
+        )
 
-    with open(args.output, "w", encoding="utf-8") as f:
-        f.write(result)
+        with open(args.output, "w", encoding="utf-8") as f:
+            f.write(result)
 
-    logger.info(f"Saved to {args.output}")
+        logger.info(f"Saved to {args.output}")
