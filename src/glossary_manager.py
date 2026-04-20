@@ -19,6 +19,7 @@ The glossary is bidirectional: querying in either language will find the entry.
 
 from typing import Optional
 
+import transformers
 from chromadb.config import Settings
 from sentence_transformers import SentenceTransformer
 
@@ -61,6 +62,7 @@ class GlossaryManager:
                 f"Loading embedding model '{settings.glossary.embedding_model}' "
                 "(first run downloads ~2GB)..."
             )
+            transformers.logging.set_verbosity_error()
             self.model = SentenceTransformer(settings.glossary.embedding_model)
             logger.info(
                 f"Embedding model '{settings.glossary.embedding_model}' is loaded."
