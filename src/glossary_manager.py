@@ -5,11 +5,14 @@ Loads a glossary CSV or XLSX, embeds all terms using multilingual-e5-large,
 stores them in ChromaDB, and provides RAG-style retrieval per chunk.
 
 Glossary file format (no header required, but header is fine):
-  Two columns: source_term, target_term
+  Three columns: id, source_term, target_term
+  - id: unique integer identifier for each term pair
+  - source_term: term in source language
+  - target_term: term in target language
   Supported formats: .csv, .xlsx
   e.g.:
-  contract termination, Vertragsauflösung
-  force majeure, höhere Gewalt
+  1,contract termination,Vertragsauflösung
+  2,force majeure,höhere Gewalt
 
 The glossary is bidirectional: querying in either language will find the entry.
 """
@@ -112,6 +115,9 @@ class GlossaryManager:
         if not self._terms:
             raise ValueError("Glossary is empty. Check your file.")
 
+        # Validate IDs before proceeding
+        self._validate_ids()
+
         model = self._get_model()
 
         # We embed BOTH directions as separate documents so that a query in
@@ -119,7 +125,8 @@ class GlossaryManager:
         ids, embeddings, documents, metadatas = [], [], [], []
 
         total_terms = len(self._terms)
-        for i, term in enumerate(self._terms):
+        for term in self._terms:
+            term_id = term["id"]
             src = term["source"]
             tgt = term["target"]
 
@@ -130,7 +137,7 @@ class GlossaryManager:
             # Forward entry (source → target)
             fwd_text = f"passage: {src}"
             fwd_embedding = model.encode(fwd_text, normalize_embeddings=True).tolist()
-            ids.append(f"fwd_{i}")
+            ids.append(f"fwd_{term_id}")
             embeddings.append(fwd_embedding)
             documents.append(src)
             metadatas.append(
@@ -146,7 +153,7 @@ class GlossaryManager:
             # Reverse entry (target → source) — same pair, but queryable from target lang
             rev_text = f"passage: {tgt}"
             rev_embedding = model.encode(rev_text, normalize_embeddings=True).tolist()
-            ids.append(f"rev_{i}")
+            ids.append(f"rev_{term_id}")
             embeddings.append(rev_embedding)
             documents.append(tgt)
             metadatas.append(
@@ -159,15 +166,14 @@ class GlossaryManager:
                 }
             )
 
-            logger.debug(
-                f"Embedding {i} of {total_terms}: {canonical_src} = {canonical_tgt}"
-            )
+            logger.debug(f"Embedding term {term_id}: {canonical_src} = {canonical_tgt}")
             if settings.log.level != "DEBUG":
-                # Progress logging - every 100 terms
-                if (i + 1) % 100 == 0 or (i + 1) == total_terms:
-                    progress_pct = ((i + 1) / total_terms) * 100
+                # Progress logging - every 100 terms (200 embeddings)
+                if len(ids) % 200 == 0 or len(ids) == total_terms * 2:
+                    progress = len(ids) // 2
+                    progress_pct = (progress / total_terms) * 100
                     logger.info(
-                        f"Embedding terms: {i + 1}/{total_terms} ({progress_pct:.1f}%)"
+                        f"Embedding terms: {progress}/{total_terms} ({progress_pct:.1f}%)"
                     )
 
         # Batch upsert (handles duplicates gracefully)
@@ -187,6 +193,31 @@ class GlossaryManager:
             f"Glossary embedded and stored. Total entries in DB: {collection.count()}"
         )
 
+    def _validate_ids(self) -> None:
+        """Validate that all term IDs are unique integers."""
+        ids = []
+        for i, term in enumerate(self._terms):
+            term_id = term.get("id")
+            if term_id is None:
+                raise ValueError(f"Term at index {i} is missing an 'id' field.")
+            if not isinstance(term_id, int):
+                raise ValueError(
+                    f"Term at index {i} has invalid 'id' value '{term_id}'. "
+                    "ID must be an integer."
+                )
+            ids.append(term_id)
+
+        # Check for duplicates
+        unique_ids = set(ids)
+        if len(ids) != len(unique_ids):
+            duplicates = [id for id in ids if ids.count(id) > 1]
+            raise ValueError(
+                f"Duplicate ID(s) found in glossary: {set(duplicates)}. "
+                "All IDs must be unique."
+            )
+
+        logger.debug(f"Validated {len(unique_ids)} unique IDs.")
+
     def _load_terms_from_csv(self, csv_path: str) -> None:
         """Read CSV into self._terms list."""
         self._terms = []
@@ -195,11 +226,21 @@ class GlossaryManager:
             # Skip header row
             next(reader, None)
             for row in reader:
-                if len(row) < 2:
+                if len(row) < 3:
+                    logger.warning(f"Row has less than 3 columns: {' | '.join(row)}")
                     continue
-                source, target = row[0].strip(), row[1].strip()
+                try:
+                    term_id = int(row[0].strip())
+                except (ValueError, TypeError):
+                    raise ValueError(
+                        f"Invalid ID value '{row[0].strip()}' in CSV. "
+                        "ID must be a valid integer."
+                    )
+                source, target = row[1].strip(), row[2].strip()
                 if source and target:
-                    self._terms.append({"source": source, "target": target})
+                    self._terms.append(
+                        {"id": term_id, "source": source, "target": target}
+                    )
         logger.info(f"Read {len(self._terms)} terms from CSV.")
 
     def _load_terms_from_xlsx(self, xlsx_path: str) -> None:
@@ -221,11 +262,20 @@ class GlossaryManager:
             for i, row in enumerate(sheet.iter_rows(values_only=True)):
                 if i == 0:  # Skip header row
                     continue
-                if not row or len(row) < 2:
+                if not row or len(row) < 3:
                     continue
-                source, target = str(row[0]).strip(), str(row[1]).strip()
+                try:
+                    term_id = int(str(row[0]).strip())
+                except (ValueError, TypeError):
+                    raise ValueError(
+                        f"Invalid ID value '{row[0]}' in XLSX at row {i + 1}. "
+                        "ID must be a valid integer."
+                    )
+                source, target = str(row[1]).strip(), str(row[2]).strip()
                 if source and target:
-                    self._terms.append({"source": source, "target": target})
+                    self._terms.append(
+                        {"id": term_id, "source": source, "target": target}
+                    )
 
         finally:
             if "workbook" in locals():
