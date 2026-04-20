@@ -527,3 +527,28 @@ class GlossaryManager:
         client.delete_collection(settings.glossary.collection_name)
         self.collection = None
         logger.info("Collection cleared.")
+
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Glossary Manager")
+    subparsers = parser.add_subparsers(dest="command", help="Available commands")
+
+    # Sync subcommand
+    sync_parser = subparsers.add_parser("sync", help="Sync glossary with ChromaDB")
+    sync_parser.add_argument(
+        "--glossary",
+        default="glossary.csv",
+        help="Path to glossary CSV or XLSX file",
+    )
+
+    args = parser.parse_args()
+
+    if args.command == "sync":
+        gm = GlossaryManager()
+        gm.sync_glossary(args.glossary, sync_mode=True)
+    else:
+        parser.print_help()
