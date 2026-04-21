@@ -527,16 +527,19 @@ if __name__ == "__main__":
     parser.add_argument("source_lang", help="Source language (e.g. 'English')")
     parser.add_argument("target_lang", help="Target language (e.g. 'German')")
     parser.add_argument(
-        "--glossary", default="glossary.csv", help="Path to glossary CSV file"
+        "--sync-glossary",
+        nargs="?",
+        const="glossary.csv",
+        default=None,
+        help=(
+            "Sync glossary (add/update/delete terms) instead of just loading. "
+            "Optionally provide a path to glossary source file "
+            "(default is glossary.csv)"
+        ),
     )
     parser.add_argument(
         "--glossary-override",
         help="Path to glossary override file (format: 'term = translation')",
-    )
-    parser.add_argument(
-        "--sync-glossary",
-        action="store_true",
-        help="Sync glossary (add/update/delete terms) instead of just loading",
     )
     parser.add_argument("--output", default="translated.txt", help="Output file path")
     parser.add_argument(
@@ -553,7 +556,9 @@ if __name__ == "__main__":
         text = f.read()
 
     gm = GlossaryManager()
-    gm.sync_glossary(args.glossary, sync_mode=args.sync_glossary)
+
+    if args.sync_glossary is not None:
+        gm.sync_glossary(args.glossary)
 
     # Parse glossary override if provided
     glossary_override = None

@@ -111,27 +111,21 @@ class GlossaryManager:
 
     # ── Glossary loading & embedding ──────────────────────────────────────────
 
-    def sync_glossary(self, glossary_source_path: str, sync_mode: bool = False) -> None:
+    def sync_glossary(self, glossary_source_path: str) -> None:
         """
         Reads glossary CSV or XLSX and syncs terms into ChromaDB.
 
-        When sync_mode=False (default):
-            - If DB is empty, loads and embeds all terms
-            - If DB has entries, just loads terms into memory (skips embedding)
-
-        When sync_mode=True:
-            - Creates a backup of the current ChromaDB
-            - Treats the glossary source as the source of truth
-            - Adds new terms (IDs not in DB)
-            - Deletes removed terms (IDs in DB but not in source)
-            - Updates modified terms (same ID but different source/target)
+        - Creates a backup of the current ChromaDB
+        - Treats the glossary source as the source of truth
+        - Adds new terms (IDs not in DB)
+        - Deletes removed terms (IDs in DB but not in source)
+        - Updates modified terms (same ID but different source/target)
         """
         collection = self._get_collection()
 
-        # Backup ChromaDB before making any changes (only when sync_mode=True)
-        if sync_mode:
-            backup_path = self.backup_chroma_db()
-            logger.info(f"Backup created at: {backup_path}")
+        # Backup ChromaDB before making any changes
+        backup_path = self.backup_chroma_db()
+        logger.info(f"Backup created at: {backup_path}")
 
         # Load terms from file first (needed for both modes)
         self._terms = GlossaryParser(glossary_source_path).load_terms_from_file()
@@ -141,14 +135,6 @@ class GlossaryManager:
 
         # Validate IDs before proceeding
         self._validate_ids()
-
-        # If sync not requested and DB has entries, just return after loading terms
-        if not sync_mode and collection.count() > 0:
-            logger.info(
-                f"Glossary already loaded ({collection.count()} entries). "
-                "Skipping sync step. Pass sync_mode=True to sync."
-            )
-            return
 
         # Get current state
         source_name = Path(glossary_source_path).stem
@@ -531,6 +517,6 @@ if __name__ == "__main__":
 
     if args.command == "sync":
         gm = GlossaryManager()
-        gm.sync_glossary(args.glossary, sync_mode=True)
+        gm.sync_glossary(args.glossary)
     else:
         parser.print_help()
