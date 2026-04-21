@@ -18,6 +18,8 @@ The glossary is bidirectional: querying in either language will find the entry.
 """
 
 import os
+import tarfile
+from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -118,12 +120,18 @@ class GlossaryManager:
             - If DB has entries, just loads terms into memory (skips embedding)
 
         When sync_mode=True:
+            - Creates a backup of the current ChromaDB
             - Treats the glossary source as the source of truth
             - Adds new terms (IDs not in DB)
             - Deletes removed terms (IDs in DB but not in source)
             - Updates modified terms (same ID but different source/target)
         """
         collection = self._get_collection()
+
+        # Backup ChromaDB before making any changes (only when sync_mode=True)
+        if sync_mode:
+            backup_path = self.backup_chroma_db()
+            logger.info(f"Backup created at: {backup_path}")
 
         # Load terms from file first (needed for both modes)
         self._terms = GlossaryParser(glossary_source_path).load_terms_from_file()
@@ -463,6 +471,29 @@ class GlossaryManager:
             logger.debug(f"Glossary pairs:\n{pairs_log}")
 
         return terms
+
+    # ── Backup ──────────────────────────────────────────────────────────────────
+
+    def backup_chroma_db(self) -> str:
+        """
+        Create a tar.gz backup of the ChromaDB directory.
+
+        Returns the path to the backup file.
+        """
+        backup_dir = Path(settings.glossary.backup_dir)
+        backup_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate timestamped filename: chromadb_YYYYMMDDHHmmss.tar.gz
+        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        backup_filename = f"chromadb_{timestamp}.tar.gz"
+        backup_path = backup_dir / backup_filename
+
+        # Create tar.gz archive
+        with tarfile.open(backup_path, "w:gz") as tar:
+            tar.add(self.chroma_dir, arcname=Path(self.chroma_dir).name)
+
+        logger.info(f"ChromaDB backed up to {backup_path}")
+        return str(backup_path)
 
     # ── Utility ───────────────────────────────────────────────────────────────
 

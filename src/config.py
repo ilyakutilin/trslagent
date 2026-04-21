@@ -77,6 +77,10 @@ class GlossarySettings(BaseSettings):
         default=100,
         description="Number of terms to embed and upsert in each batch (smaller = more frequent saves)",
     )
+    backup_dir: str = Field(
+        default="./chromadb/backup",
+        description="Directory for ChromaDB backups (tar.gz files)",
+    )
 
 
 class Settings(BaseSettings):
