@@ -22,40 +22,6 @@ The first run will download the `multilingual-e5-large` model (~2GB). This is ca
 
 ## Glossary format
 
-A three-column file with a unique integer ID for each term pair. Header row is optional (auto-detected and skipped).
-File name is important as it will be used in the IDs in the DB. So you should keep the file name consistent when updating.
-
-Supported formats: **CSV** (`.csv`) and **XLSX** (`.xlsx`).
-
-The three columns are:
-
-1. **id** - A unique integer identifier for each term pair
-2. **source_term** - Term in the source language
-3. **target_term** - Term in the target language
-
-All IDs must be unique integers. The system will validate this on loading.
-
-### CSV example
-
-```csv
-id,source_term,target_term
-1,contract termination,Vertragsauflösung
-2,force majeure,höhere Gewalt
-3,party of the first part,Partei des ersten Teils
-```
-
-### XLSX example
-
-An Excel spreadsheet with three columns:
-
-| id  | source_term             | target_term             |
-| --- | ----------------------- | ----------------------- |
-| 1   | contract termination    | Vertragsauflösung       |
-| 2   | force majeure           | höhere Gewalt           |
-| 3   | party of the first part | Partei des ersten Teils |
-
-### XML
-
 XML file can be obtained by exporting from Multiterm with the default settings. No further converting is required.
 
 ==========

@@ -9,8 +9,8 @@ dependencies = [
     "langchain-text-splitters>=1.1.1",
     "loguru>=0.7.0",
     "openai>=2.31.0",
-    "openpyxl>=3.1.0",
     "pydantic-settings>=2.1.0",
+    "pymorphy3>=2.0.6",
     "sentence-transformers>=5.4.0",
     "torch>=2.11.0",
 ]

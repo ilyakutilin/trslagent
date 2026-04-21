@@ -1,9 +1,5 @@
-import csv
-import os
 from pathlib import Path
 from xml.etree import ElementTree as ET
-
-from openpyxl import load_workbook
 
 from src.config import get_settings, logger
 
@@ -14,77 +10,7 @@ class GlossaryParser:
     def __init__(self, file_path: str) -> None:
         self.file_path = file_path
 
-    def _load_terms_from_csv(self, csv_path: Path) -> list[dict]:
-        """Read CSV into terms dict list."""
-        terms = []
-        stem = csv_path.stem
-        with open(csv_path, newline="", encoding="utf-8") as f:
-            reader = csv.reader(f)
-            # Skip header row
-            next(reader, None)
-            for row in reader:
-                if len(row) < 3:
-                    logger.warning(f"Row has less than 3 columns: {' | '.join(row)}")
-                    continue
-                try:
-                    term_id = int(row[0].strip())
-                except (ValueError, TypeError):
-                    raise ValueError(
-                        f"Invalid ID value '{row[0].strip()}' in CSV. "
-                        "ID must be a valid integer."
-                    )
-                source, target = row[1].strip(), row[2].strip()
-                if source and target:
-                    terms.append(
-                        {"id": f"{stem}_{term_id}", "source": source, "target": target}
-                    )
-        logger.info(f"Read {len(terms)} terms from CSV.")
-        return terms
-
-    def _load_terms_from_xlsx(self, xlsx_path: Path) -> list[dict]:
-        """Read XLSX into terms dict list."""
-        terms = []
-
-        if not os.path.exists(xlsx_path):
-            raise FileNotFoundError(f"XLSX file not found: {xlsx_path}")
-
-        stem = xlsx_path.stem
-
-        try:
-            workbook = load_workbook(xlsx_path, read_only=True, data_only=True)
-            sheet = workbook.active
-
-            if sheet is None:
-                workbook.close()
-                raise ValueError("XLSX file is empty or has no active sheet.")
-
-            # Skip header row by enumerating and skipping index 0
-            for i, row in enumerate(sheet.iter_rows(values_only=True)):
-                if i == 0:  # Skip header row
-                    continue
-                if not row or len(row) < 3:
-                    continue
-                try:
-                    term_id = int(str(row[0]).strip())
-                except (ValueError, TypeError):
-                    raise ValueError(
-                        f"Invalid ID value '{row[0]}' in XLSX at row {i + 1}. "
-                        "ID must be a valid integer."
-                    )
-                source, target = str(row[1]).strip(), str(row[2]).strip()
-                if source and target:
-                    terms.append(
-                        {"id": f"{stem}_{term_id}", "source": source, "target": target}
-                    )
-
-        finally:
-            if "workbook" in locals():
-                workbook.close()
-
-        logger.info(f"Read {len(terms)} terms from XLSX.")
-        return terms
-
-    def _load_terms_from_xml(self, xml_path: Path) -> list[dict]:
+    def parse(self, xml_path: Path) -> list[dict]:
         """
         Read a MultiTerm XML file into terms dict list.
 
@@ -272,19 +198,3 @@ class GlossaryParser:
             f"(source={source_lang}, target={target_lang})."
         )
         return loaded
-
-    def load_terms_from_file(self) -> list[dict]:
-        """Auto-detect file format and load accordingly."""
-        path = Path(self.file_path)
-        ext = path.suffix
-        if ext == ".csv":
-            return self._load_terms_from_csv(path)
-        elif ext == ".xlsx":
-            return self._load_terms_from_xlsx(path)
-        elif ext == ".xml":
-            return self._load_terms_from_xml(path)
-        else:
-            raise ValueError(
-                f"Unsupported file format '{ext}'. "
-                "Only .csv, .xlsx, or .xml files are supported."
-            )
