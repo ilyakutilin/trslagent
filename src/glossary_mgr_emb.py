@@ -51,7 +51,7 @@ settings = get_settings()
 #   We handle this automatically below.
 
 
-class GlossaryManager:
+class GlossaryEmbeddingManager:
     def __init__(self, chroma_dir: str = settings.glossary.chroma_dir):
         self.chroma_dir = chroma_dir
         self.model: Optional[SentenceTransformer] = None
@@ -530,7 +530,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.command == "sync":
-        gm = GlossaryManager()
+        gm = GlossaryEmbeddingManager()
         gm.sync_glossary(args.glossary, sync_mode=True)
     else:
         parser.print_help()

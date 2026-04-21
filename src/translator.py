@@ -18,7 +18,7 @@ from openai import (
 from openai.types.chat import ChatCompletionMessageParam
 
 from src.config import get_settings, logger
-from src.glossary_manager import GlossaryManager
+from src.glossary_mgr_emb import GlossaryEmbeddingManager
 from src.splitter import CHUNK_OVERLAP, split_text
 
 # ── Configuration ────────────────────────────────────────────────────────────
@@ -411,7 +411,7 @@ def print_prompts_only(
     text: str,
     source_lang: str,
     target_lang: str,
-    glossary_manager: GlossaryManager,
+    glossary_manager: GlossaryEmbeddingManager,
     model: str = settings.llm.model,
     glossary_override: Optional[Dict[str, str]] = None,
 ) -> None:
@@ -466,7 +466,7 @@ def translate_document(
     text: str,
     source_lang: str,
     target_lang: str,
-    glossary_manager: GlossaryManager,
+    glossary_manager: GlossaryEmbeddingManager,
     model: str = settings.llm.model,
     glossary_override: Optional[Dict[str, str]] = None,
 ) -> str:
@@ -552,7 +552,7 @@ if __name__ == "__main__":
     with open(args.input_file, "r", encoding="utf-8") as f:
         text = f.read()
 
-    gm = GlossaryManager()
+    gm = GlossaryEmbeddingManager()
     gm.sync_glossary(args.glossary, sync_mode=args.sync_glossary)
 
     # Parse glossary override if provided
