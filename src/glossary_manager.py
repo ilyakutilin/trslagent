@@ -18,6 +18,7 @@ The glossary is bidirectional: querying in either language will find the entry.
 """
 
 import os
+from pathlib import Path
 from typing import Optional
 
 import transformers
@@ -142,8 +143,9 @@ class GlossaryManager:
             return
 
         # Get current state
+        source_name = Path(glossary_source_path).stem
         source_ids = {term["id"] for term in self._terms}
-        db_ids = self._get_existing_db_ids()
+        db_ids = self._get_existing_db_ids(source_name)
 
         # Determine what needs to be added, deleted, or updated
         new_ids = source_ids - db_ids
@@ -182,7 +184,7 @@ class GlossaryManager:
             f"Glossary sync complete. Total entries in DB: {collection.count()}"
         )
 
-    def _get_existing_db_ids(self) -> set[int]:
+    def _get_existing_db_ids(self, source_name: str = "") -> set[int]:
         """Extract all term IDs currently in the ChromaDB collection."""
         collection = self._get_collection()
         result = collection.get(include=[])
@@ -190,9 +192,13 @@ class GlossaryManager:
 
         # Parse IDs like "fwd_abc123" or "rev_abc123" to extract ID
         term_ids = set()
+        fwd_startswith = f"fwd_{source_name}{'_' if source_name else ''}"
+        rev_startswith = f"rev_{source_name}{'_' if source_name else ''}"
         for entry_id in ids:
             # IDs are formatted as "fwd_{id}" or "rev_{id}"
-            if entry_id.startswith("fwd_") or entry_id.startswith("rev_"):
+            if entry_id.startswith(fwd_startswith) or entry_id.startswith(
+                rev_startswith
+            ):
                 try:
                     term_id = entry_id.split("_", 1)[1]
                     term_ids.add(term_id)
