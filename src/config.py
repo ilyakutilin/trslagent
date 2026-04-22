@@ -56,6 +56,10 @@ class ChunkingSettings(BaseSettings):
 class GlossarySettings(BaseSettings):
     """Glossary/RAG settings"""
 
+    xml_dir: str = Field(
+        default="./glossary",
+        description="Directory with glossary XML files exported by Multiterm",
+    )
     top_k: int = Field(
         default=20, description="Number of glossary terms to retrieve per chunk"
     )

@@ -22,7 +22,8 @@ The first run will download the `multilingual-e5-large` model (~2GB). This is ca
 
 ## Glossary format
 
-XML file can be obtained by exporting from Multiterm with the default settings. No further converting is required.
+Glossaries shall be XML files can be obtained by exporting from Multiterm with the default settings. No further converting is required.
+Put all glossaries in one dir and set the path to that dir in the .env file or as a cli argument.
 
 ==========
 
