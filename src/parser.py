@@ -6,6 +6,7 @@ from iso639 import Lang
 from iso639.exceptions import InvalidLanguageValue
 
 from src.config import get_settings, logger
+from src.lemmatizer import Lemmatizer
 
 settings = get_settings()
 
@@ -18,6 +19,7 @@ class ParserError(Exception):
 class Term:
     language: Lang
     value: str
+    lemmatized: str | None = None
 
 
 @dataclass
@@ -115,6 +117,9 @@ class GlossaryXMLParser:
 
         return terms
 
+    def _lemmatize_term(self, term: str, lang: Lang) -> str | None:
+        return Lemmatizer(term, lang).lemmatize()
+
     def _get_glossary_entries(
         self, xml_root: ElementTree.Element
     ) -> list[GlossaryEntry]:
@@ -166,7 +171,10 @@ class GlossaryXMLParser:
                     continue
 
                 for lt in lang_terms:
-                    entry.terms.append(Term(language=lang, value=lt))
+                    lemmatized_lt = self._lemmatize_term(lt, lang)
+                    entry.terms.append(
+                        Term(language=lang, value=lt, lemmatized=lemmatized_lt)
+                    )
 
             entries.append(entry)
 
