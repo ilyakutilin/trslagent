@@ -10,7 +10,7 @@ class Lemmatizer:
         self.phrase = phrase
         self.lang = lang
 
-    def _lemmatize_english(self) -> str:
+    def _lemmatize_english(self) -> list[str]:
         nlp = spacy.load(
             "en_core_web_sm", disable=["ner", "parser"]
         )  # only need tagger for lemmas
@@ -20,18 +20,16 @@ class Lemmatizer:
 
         # Lemmatize a multi-word phrase
         doc = nlp(normalized)
-        lemmas = [
+        return [
             token.lemma_.lower() for token in doc if token.is_alpha or token.is_digit
         ]
-        return " ".join(lemmas)
 
-    def _lemmatize_russian(self):
+    def _lemmatize_russian(self) -> list[str]:
         words = re.findall(r"[а-яёА-ЯЁa-zA-Z0-9]+", self.phrase)
         morph = pymorphy3.MorphAnalyzer()
-        lemmas = [morph.parse(word)[0].normal_form for word in words]
-        return " ".join(lemmas)
+        return [morph.parse(word)[0].normal_form for word in words]
 
-    def lemmatize(self) -> str | None:
+    def lemmatize(self) -> list[str] | None:
         def unsupported():
             return None
 

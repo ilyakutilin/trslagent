@@ -118,7 +118,11 @@ class GlossaryXMLParser:
         return terms
 
     def _lemmatize_term(self, term: str, lang: Lang) -> str | None:
-        return Lemmatizer(term, lang).lemmatize()
+        lemmatizer = Lemmatizer(term, lang)
+        lemmas = lemmatizer.lemmatize()
+        if lemmas is None:
+            return None
+        return " ".join(lemmas)
 
     def _get_glossary_entries(
         self, xml_root: ElementTree.Element
