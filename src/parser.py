@@ -1,4 +1,3 @@
-from dataclasses import dataclass
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -6,7 +5,9 @@ from iso639 import Lang
 from iso639.exceptions import InvalidLanguageValue
 
 from src.config import get_settings, logger
+from src.glossary_cache import GlossaryCache
 from src.lemmatizer import Lemmatizer
+from src.models import CachedEntries, GlossaryEntry, GlossaryFile, Term
 
 settings = get_settings()
 
@@ -15,26 +16,9 @@ class ParserError(Exception):
     pass
 
 
-@dataclass
-class Term:
-    language: Lang
-    value: str
-    lemmatized: str | None = None
-
-
-@dataclass
-class GlossaryEntry:
-    id: str
-    terms: list[Term]
-
-    def str_synonyms(self, lang: Lang) -> str:
-        return " | ".join([t.value for t in self.terms if t.language == lang])
-
-
 class GlossaryXMLParser:
-    def __init__(self, file_path: str) -> None:
+    def __init__(self, file_path: str | Path) -> None:
         self.file_path = file_path
-        self._entry_ids: set[str] = set()
 
     def _get_xml_root(self) -> ElementTree.Element:
         fp = Path(self.file_path)
@@ -62,23 +46,25 @@ class GlossaryXMLParser:
             )
         return root
 
-    def _get_entry_id(self, concept_group: ElementTree.Element) -> str:
+    def _get_entry_id(self, concept_group: ElementTree.Element) -> int:
         concept_el = concept_group.find("concept")
         if concept_el is None:
             raise ValueError("conceptGrp has no <concept> tag, therefore no ID")
+
         concept_id = (concept_el.text or "").strip()
+
         if not concept_id:
             raise ValueError("conceptGrp <concept> tag is empty, therefore no ID")
 
-        stem = Path(self.file_path).stem
-        entry_id = f"{stem}_{concept_id}"
+        try:
+            id_ = int(concept_id)
+        except ValueError:
+            raise ValueError(f"failed to convert {concept_id} to integer")
 
-        previous_ids_len = len(self._entry_ids)
-        self._entry_ids.add(entry_id)
-        if len(self._entry_ids) == previous_ids_len:
-            raise ValueError(f"entry id {entry_id} is not unique")
+        if id_ < 1:
+            raise ValueError(f"{id_} is an invalid ID")
 
-        return entry_id
+        return id_
 
     def _get_language(self, language_group: ElementTree.Element) -> Lang:
         lang_el = language_group.find("language")
@@ -147,13 +133,13 @@ class GlossaryXMLParser:
                 logger.warning(f"Skipping conceptGrp with seq No. {cg_idx}: {e}")
                 continue
 
-            entry = GlossaryEntry(id=entry_id, terms=[])
-
             language_groups = cg.findall("languageGrp")
             if not language_groups:
                 logger.warning(
                     f"Skipping conceptGrp with seq No. {cg_idx}: no <languageGrp> tags"
                 )
+
+            terms = set()
 
             for lg_idx, lg in enumerate(language_groups):
                 try:
@@ -175,12 +161,9 @@ class GlossaryXMLParser:
                     continue
 
                 for lt in lang_terms:
-                    lemmatized_lt = self._lemmatize_term(lt, lang)
-                    entry.terms.append(
-                        Term(language=lang, value=lt, lemmatized=lemmatized_lt)
-                    )
+                    terms.add(Term(language=lang, value=lt))
 
-            entries.append(entry)
+            entries.append(GlossaryEntry(id=entry_id, terms=frozenset(terms)))
 
         len_concept_groups = len(concept_groups)
         len_entries = len(entries)
@@ -205,10 +188,23 @@ class GlossaryXMLParser:
 
         glossary_entries = self._get_glossary_entries(root)
 
+        if len(glossary_entries) == 0:
+            raise ValueError(f"No entries have been parsed from {self.file_path}")
+
         logger.info(
             f"Finished loading {len(glossary_entries)} entries from {self.file_path}"
         )
         return glossary_entries
+
+
+class GlossaryUpdater:
+    def __init__(self, old: list[GlossaryEntry], new: list[GlossaryEntry]) -> None:
+        self.old = old
+        self.new = new
+
+    def update(self) -> list[GlossaryEntry]:
+        # TODO: Implement GlossaryUpdater.update()
+        raise NotImplementedError
 
 
 class GlossaryParser:
@@ -216,6 +212,7 @@ class GlossaryParser:
         self.dir_path = dir_path or settings.glossary.xml_dir
 
     def parse(self) -> list[GlossaryEntry]:
+        # TODO: Update docstring
         """
         Process all XML files in a directory, parse them with GlossaryXMLParser,
         and return a combined list of GlossaryEntry objects.
@@ -244,39 +241,32 @@ class GlossaryParser:
             - Collects the list of GlossaryEntry objects from each file.
             - Returns the concatenated list.
         """
-        dir_path = self.dir_path
-        dir_path_obj = Path(dir_path)
+        xml_files = self._get_xml_files_in_dir()
 
-        # 1. Check existence and directory type
-        if not dir_path_obj.exists():
-            raise ParserError(f"Directory does not exist: {dir_path}")
-
-        if not dir_path_obj.is_dir():
-            raise ParserError(f"Path is not a directory: {dir_path}")
-
-        # 2. Check that directory is not empty (contains any files or subdirs)
-        if not any(dir_path_obj.iterdir()):
-            raise ParserError(f"Directory is empty: {dir_path}")
-
-        # 3. Find all XML files in the directory (non-recursive)
-        xml_files = list(dir_path_obj.glob("*.xml"))
-        if not xml_files:
-            raise ParserError(f"No XML files found in directory: {dir_path}")
+        self._remove_non_matching_cache_files(xml_files)
 
         all_entries = []
 
-        # 4. Process each XML file
         failed_count = 0
         for xml_file in xml_files:
-            file_path_str = str(xml_file)
+            cached_entries: CachedEntries = self._get_cached_entries(xml_file)
+
+            if cached_entries.are_up_to_date:
+                all_entries.extend(cached_entries.entries)
+                continue
+
             try:
-                parser = GlossaryXMLParser(file_path_str)
-                entries = parser.parse()
-                all_entries.extend(entries)
+                parsed_entries = self._parse_xml_file(xml_file)
             except Exception as e:
                 failed_count += 1
-                logger.warning(f"Error parsing {file_path_str}: {e}")
+                logger.warning(f"Error parsing {xml_file}: {e}")
                 continue
+
+            updated_entries = self._get_updated_entries(
+                old=cached_entries.entries, new=parsed_entries
+            )
+
+            all_entries.extend(updated_entries)
 
         if not all_entries:
             if failed_count == len(xml_files):
@@ -284,3 +274,45 @@ class GlossaryParser:
             raise ParserError("No glossary entries found across all XML files")
 
         return all_entries
+
+    def _get_xml_files_in_dir(self) -> list[Path]:
+        dir_path = Path(self.dir_path)
+
+        if not dir_path.exists():
+            raise ParserError(f"Directory does not exist: {dir_path}")
+
+        if not dir_path.is_dir():
+            raise ParserError(f"Path is not a directory: {dir_path}")
+
+        if not any(dir_path.iterdir()):
+            raise ParserError(f"Directory is empty: {dir_path}")
+
+        xml_files = list(dir_path.glob("*.xml"))
+        if not xml_files:
+            raise ParserError(f"No XML files found in directory: {dir_path}")
+
+        return xml_files
+
+    def _remove_non_matching_cache_files(self, xml_files: list[Path]) -> None:
+        # TODO: Implement GlossaryParser._remove_non_matching_cache_files()
+        raise NotImplementedError
+
+    def _get_cached_entries(self, xml_file: str | Path) -> CachedEntries:
+        gf = GlossaryFile(xml_file_path=xml_file)
+        return GlossaryCache(gf).get_cache()
+
+    def _parse_xml_file(self, xml_file: str | Path) -> list[GlossaryEntry]:
+        parser = GlossaryXMLParser(xml_file)
+        return parser.parse()
+
+    def _get_updated_entries(
+        self, old: list[GlossaryEntry], new: list[GlossaryEntry]
+    ) -> list[GlossaryEntry]:
+        updater = GlossaryUpdater(old, new)
+        return updater.update()
+
+    def _update_cache(
+        self, glossary_file: GlossaryFile, entries: list[GlossaryEntry]
+    ) -> None:
+        # TODO: Implement GlossaryParser._update_cache()
+        raise NotImplementedError
