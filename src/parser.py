@@ -6,8 +6,8 @@ from iso639.exceptions import InvalidLanguageValue
 
 from src.config import get_settings, logger
 from src.glossary_cache import GlossaryCache
-from src.lemmatizer import Lemmatizer
-from src.models import CachedEntries, GlossaryEntry, GlossaryFile, Term
+from src.lemmatizer import GlossaryLemmatizer
+from src.models import CachedEntries, GlossaryDiff, GlossaryEntry, GlossaryFile, Term
 
 settings = get_settings()
 
@@ -103,13 +103,6 @@ class GlossaryXMLParser:
 
         return terms
 
-    def _lemmatize_term(self, term: str, lang: Lang) -> str | None:
-        lemmatizer = Lemmatizer(term, lang)
-        lemmas = lemmatizer.lemmatize()
-        if lemmas is None:
-            return None
-        return " ".join(lemmas)
-
     def _get_glossary_entries(
         self, xml_root: ElementTree.Element
     ) -> list[GlossaryEntry]:
@@ -184,6 +177,7 @@ class GlossaryXMLParser:
             ValueError:        If the XML structure is invalid or inconsistent.
             RuntimeError:      For unexpected errors during parsing.
         """
+        logger.info(f"Parsing {Path(self.file_path).name}...")
         root = self._get_xml_root()
 
         glossary_entries = self._get_glossary_entries(root)
@@ -202,9 +196,59 @@ class GlossaryUpdater:
         self.old = old
         self.new = new
 
+    def diff_glossary(self) -> GlossaryDiff:
+        """
+        Compare old (cached, lemmatized) entries against new (parsed, unlemmatized).
+        Returns what needs to be added, updated, and deleted.
+        """
+        old_by_id: dict[int, GlossaryEntry] = {e.id: e for e in self.old}
+        new_by_id: dict[int, GlossaryEntry] = {e.id: e for e in self.new}
+
+        old_ids = old_by_id.keys()
+        new_ids = new_by_id.keys()
+
+        added_ids = new_ids - old_ids
+        deleted_ids = old_ids - new_ids
+        common_ids = old_ids & new_ids
+
+        to_add = [new_by_id[i] for i in added_ids]
+        to_delete = list(deleted_ids)
+        to_update = [new_by_id[i] for i in common_ids if new_by_id[i] != old_by_id[i]]
+
+        return GlossaryDiff(to_add=to_add, to_update=to_update, to_delete=to_delete)
+
+    def apply_glossary_diff(self, diff: GlossaryDiff) -> list[GlossaryEntry]:
+        entries_by_id: dict[int, GlossaryEntry] = {e.id: e for e in self.old}
+
+        # Deletions
+        for entry_id in diff.to_delete:
+            entries_by_id.pop(entry_id, None)
+
+        # Additions + updates
+        needs_lemmatization = diff.to_add + diff.to_update
+        if needs_lemmatization:
+            glossary_lemmatizer = GlossaryLemmatizer(needs_lemmatization)
+            lemmatized: list[GlossaryEntry] = glossary_lemmatizer.lemmatize_entries()
+            for entry in lemmatized:
+                entries_by_id[entry.id] = entry  # insert or replace
+
+        return list(entries_by_id.values())
+
     def update(self) -> list[GlossaryEntry]:
-        # TODO: Implement GlossaryUpdater.update()
-        raise NotImplementedError
+        logger.info(
+            f"Comparing {len(self.old)} old (cached, lemmatized) entries "
+            f"against {len(self.new)} new (parsed, unlemmatized)"
+        )
+        diff: GlossaryDiff = self.diff_glossary()
+        logger.debug(f"{len(diff.to_add)} glossary entries to be added")
+        logger.debug(f"{len(diff.to_delete)} glossary entries to be deleted")
+        logger.debug(f"{len(diff.to_update)} glossary entries to be updated")
+
+        updated_entries = self.apply_glossary_diff(diff)
+        logger.info(
+            f"All {len(updated_entries)} entries have been successfully updated"
+        )
+        return self.apply_glossary_diff(diff)
 
 
 class GlossaryParser:
@@ -242,14 +286,25 @@ class GlossaryParser:
             - Returns the concatenated list.
         """
         xml_files = self._get_xml_files_in_dir()
+        logger.info(
+            f"The following glossary XML files found in {self.dir_path}:\n"
+            f"{'\n'.join([xmlf.name for xmlf in xml_files])}\n"
+        )
 
-        self._remove_non_matching_cache_files(xml_files)
+        removed_cache_files = self._remove_non_matching_cache_files(xml_files)
+        if removed_cache_files:
+            logger.warning(
+                f"Non-matching pickle cache files removed from {self.dir_path}:\n"
+                f"{'\n'.join([cf.name for cf in removed_cache_files])}"
+            )
 
         all_entries = []
 
         failed_count = 0
         for xml_file in xml_files:
-            cached_entries: CachedEntries = self._get_cached_entries(xml_file)
+            logger.info(f"Processing {xml_file.name}...")
+            glossary_file = GlossaryFile(xml_file)
+            cached_entries: CachedEntries = self._get_cached_entries(glossary_file)
 
             if cached_entries.are_up_to_date:
                 all_entries.extend(cached_entries.entries)
@@ -267,6 +322,8 @@ class GlossaryParser:
             )
 
             all_entries.extend(updated_entries)
+
+            self._update_cache(glossary_file, updated_entries)
 
         if not all_entries:
             if failed_count == len(xml_files):
@@ -293,13 +350,17 @@ class GlossaryParser:
 
         return xml_files
 
-    def _remove_non_matching_cache_files(self, xml_files: list[Path]) -> None:
-        # TODO: Implement GlossaryParser._remove_non_matching_cache_files()
-        raise NotImplementedError
+    def _remove_non_matching_cache_files(self, xml_files: list[Path]) -> list[Path]:
+        removed: list[Path] = []
+        for file in Path(self.dir_path).glob("*.pickle"):
+            if file.stem not in [xmlf.stem for xmlf in xml_files]:
+                file.unlink()
+                removed.append(file)
 
-    def _get_cached_entries(self, xml_file: str | Path) -> CachedEntries:
-        gf = GlossaryFile(xml_file_path=xml_file)
-        return GlossaryCache(gf).get_cache()
+        return removed
+
+    def _get_cached_entries(self, glossary_file: GlossaryFile) -> CachedEntries:
+        return GlossaryCache(glossary_file).get_cache()
 
     def _parse_xml_file(self, xml_file: str | Path) -> list[GlossaryEntry]:
         parser = GlossaryXMLParser(xml_file)
@@ -314,5 +375,4 @@ class GlossaryParser:
     def _update_cache(
         self, glossary_file: GlossaryFile, entries: list[GlossaryEntry]
     ) -> None:
-        # TODO: Implement GlossaryParser._update_cache()
-        raise NotImplementedError
+        GlossaryCache(glossary_file).write_cache(entries)

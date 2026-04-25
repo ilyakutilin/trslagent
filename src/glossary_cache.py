@@ -22,6 +22,7 @@ class GlossaryCache:
         empty_cache = CachedEntries(entries=[], are_up_to_date=False)
 
         if not self.cache_file.exists():
+            logger.info("Glossary cache file does not exist")
             return empty_cache
 
         try:
@@ -38,7 +39,7 @@ class GlossaryCache:
             if are_up_to_date:
                 logger.warning("Cache is stale. Re-parsing is required.")
             else:
-                logger.info("Cache is up to date.")
+                logger.info("Cache is up to date and is going to be used.")
 
             return cached_entries
 

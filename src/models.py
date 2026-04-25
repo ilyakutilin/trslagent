@@ -1,5 +1,6 @@
 import hashlib
 from pathlib import Path
+from typing import NamedTuple
 
 from iso639 import Lang
 
@@ -54,6 +55,12 @@ class GlossaryFile:
             digest = hashlib.file_digest(f, "sha256")
 
         return digest.hexdigest()
+
+
+class GlossaryDiff(NamedTuple):
+    to_add: list[GlossaryEntry]  # brand new entries (need full lemmatization)
+    to_update: list[GlossaryEntry]  # changed entries (need re-lemmatization)
+    to_delete: list[int]  # IDs of removed entries
 
 
 class CachedEntries:

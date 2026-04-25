@@ -4,33 +4,44 @@ import pymorphy3
 import spacy
 from iso639 import Lang
 
+from src.models import GlossaryEntry, Term
+
 
 class Lemmatizer:
-    def __init__(self, phrase: str, lang: Lang) -> None:
-        self.phrase = phrase
-        self.lang = lang
+    def __init__(self) -> None:
+        self.nlp: spacy.language.Language | None = None
+        self.morph: pymorphy3.MorphAnalyzer | None = None
 
-    def _lemmatize_english(self) -> list[str]:
-        nlp = spacy.load(
-            "en_core_web_sm", disable=["ner", "parser"]
-        )  # only need tagger for lemmas
+    def _lemmatize_english(self, text: str) -> list[str]:
+        if self.nlp is None:
+            self.nlp = spacy.load("en_core_web_sm", disable=["ner", "parser"])
 
-        # Normalize hyphens before lemmatizing
-        normalized = self.phrase.replace("-", " ").replace("–", " ")
+        normalized = text.replace("-", " ").replace("–", " ")
 
-        # Lemmatize a multi-word phrase
-        doc = nlp(normalized)
+        doc = self.nlp(normalized)
         return [
             token.lemma_.lower() for token in doc if token.is_alpha or token.is_digit
         ]
 
-    def _lemmatize_russian(self) -> list[str]:
-        words = re.findall(r"[а-яёА-ЯЁa-zA-Z0-9]+", self.phrase)
-        morph = pymorphy3.MorphAnalyzer()
-        return [morph.parse(word)[0].normal_form for word in words]
+    def _lemmatize_russian(self, text: str) -> list[str]:
+        if self.morph is None:
+            self.morph = pymorphy3.MorphAnalyzer()
+        words = re.findall(r"[а-яёА-ЯЁa-zA-Z0-9]+", text)
 
-    def lemmatize(self) -> list[str] | None:
-        def unsupported():
+        lemmatized: list[str] = []
+        lemma_cache: dict[str, str] = dict()
+        for word in words:
+            if word in lemma_cache:
+                lemmatized.append(lemma_cache[word])
+                continue
+            parses = self.morph.parse(word)
+            lemmatized_word = parses[0].normal_form if parses else word
+            lemmatized.append(lemmatized_word)
+            lemma_cache[word] = lemmatized_word
+        return lemmatized
+
+    def lemmatize(self, text: str, lang: Lang) -> list[str] | None:
+        def unsupported(*args, **kwargs):
             return None
 
         lemmatizers = {
@@ -38,4 +49,32 @@ class Lemmatizer:
             Lang("ru"): self._lemmatize_russian,
         }
 
-        return lemmatizers.get(self.lang, unsupported)()
+        return lemmatizers.get(lang, unsupported)(text)
+
+
+class GlossaryLemmatizer:
+    def __init__(self, glossary_entries: list[GlossaryEntry]) -> None:
+        self.entries = glossary_entries
+        self.lemmatizer = Lemmatizer()
+
+    def lemmatize_entries(self) -> list[GlossaryEntry]:
+        updated_entries: list[GlossaryEntry] = []
+        for entry in self.entries:
+            updated_terms: list[Term] = []
+            for term in entry.terms:
+                term_lemmas = self.lemmatizer.lemmatize(term.value, term.language)
+                if term_lemmas is None:
+                    updated_terms.append(term)
+                    continue
+                lemmatized_term = " ".join(term_lemmas)
+                updated_term = Term(
+                    language=term.language,
+                    value=term.value,
+                    lemmatized=lemmatized_term,
+                )
+                updated_terms.append(updated_term)
+
+            updated_entry = GlossaryEntry(id=entry.id, terms=frozenset(updated_terms))
+            updated_entries.append(updated_entry)
+
+        return updated_entries
