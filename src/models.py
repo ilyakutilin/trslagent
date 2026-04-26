@@ -28,8 +28,14 @@ class GlossaryEntry:
         self.id = id
         self.terms = terms
 
-    def str_synonyms(self, lang: Lang) -> str:
-        return " | ".join([t.value for t in self.terms if t.language == lang])
+    def to_string(self, source_lang: Lang, target_lang: Lang) -> str:
+        source_str = " | ".join(
+            [t.value for t in self.terms if t.language == source_lang]
+        )
+        target_str = " | ".join(
+            [t.value for t in self.terms if t.language == target_lang]
+        )
+        return f"{source_str} = {target_str}"
 
     def __eq__(self, other):
         if not isinstance(other, GlossaryEntry):
