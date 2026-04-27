@@ -165,8 +165,9 @@ def example(lang: str) -> None:
         entry = GlossaryEntry(id=idx, terms=terms)
         entries.append(entry)
 
-    glossary_lemmatizer = GlossaryLemmatizer(glossary_entries=entries)
-    lemmatized_entries = glossary_lemmatizer.lemmatize_entries()
+    lemmatizer = Lemmatizer()
+    glossary_lemmatizer = GlossaryLemmatizer(lemmatizer)
+    lemmatized_entries = glossary_lemmatizer.lemmatize_entries(entries)
 
     en_text = """
     The company manufacturer issued a return certificate to the contractor.
@@ -192,7 +193,7 @@ def example(lang: str) -> None:
 
     term_matcher = TermMatcher(glossary_entries=lemmatized_entries)
     matched_entries = term_matcher.match(
-        text=text, lang=Lang(lang), lemmatizer=glossary_lemmatizer.lemmatizer
+        text=text, lang=Lang(lang), lemmatizer=lemmatizer
     )
     for me in matched_entries:
         print(

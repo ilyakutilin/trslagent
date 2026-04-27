@@ -53,13 +53,15 @@ class Lemmatizer:
 
 
 class GlossaryLemmatizer:
-    def __init__(self, glossary_entries: list[GlossaryEntry]) -> None:
-        self.entries = glossary_entries
-        self.lemmatizer = Lemmatizer()
+    def __init__(
+        self,
+        lemmatizer: Lemmatizer | None = None,
+    ) -> None:
+        self.lemmatizer = lemmatizer if lemmatizer else Lemmatizer()
 
-    def lemmatize_entries(self) -> list[GlossaryEntry]:
+    def lemmatize_entries(self, entries: list[GlossaryEntry]) -> list[GlossaryEntry]:
         updated_entries: list[GlossaryEntry] = []
-        for entry in self.entries:
+        for entry in entries:
             updated_terms: list[Term] = []
             for term in entry.terms:
                 term_lemmas = self.lemmatizer.lemmatize(term.value, term.language)

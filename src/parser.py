@@ -6,7 +6,7 @@ from iso639.exceptions import InvalidLanguageValue
 
 from src.config import get_settings, logger
 from src.glossary_cache import GlossaryCache
-from src.lemmatizer import GlossaryLemmatizer
+from src.lemmatizer import GlossaryLemmatizer, Lemmatizer
 from src.models import CachedEntries, GlossaryDiff, GlossaryEntry, GlossaryFile, Term
 
 settings = get_settings()
@@ -192,9 +192,17 @@ class GlossaryXMLParser:
 
 
 class GlossaryUpdater:
-    def __init__(self, old: list[GlossaryEntry], new: list[GlossaryEntry]) -> None:
+    def __init__(
+        self,
+        old: list[GlossaryEntry],
+        new: list[GlossaryEntry],
+        glossary_lemmatizer: GlossaryLemmatizer | None = None,
+    ) -> None:
         self.old = old
         self.new = new
+        self.glossary_lemmatizer = (
+            glossary_lemmatizer if glossary_lemmatizer else GlossaryLemmatizer()
+        )
 
     def diff_glossary(self) -> GlossaryDiff:
         """
@@ -227,8 +235,9 @@ class GlossaryUpdater:
         # Additions + updates
         needs_lemmatization = diff.to_add + diff.to_update
         if needs_lemmatization:
-            glossary_lemmatizer = GlossaryLemmatizer(needs_lemmatization)
-            lemmatized: list[GlossaryEntry] = glossary_lemmatizer.lemmatize_entries()
+            lemmatized: list[GlossaryEntry] = (
+                self.glossary_lemmatizer.lemmatize_entries(needs_lemmatization)
+            )
             for entry in lemmatized:
                 entries_by_id[entry.id] = entry  # insert or replace
 
@@ -252,8 +261,11 @@ class GlossaryUpdater:
 
 
 class GlossaryParser:
-    def __init__(self, dir_path: str | None = None) -> None:
+    def __init__(
+        self, dir_path: str | None = None, lemmatizer: Lemmatizer | None = None
+    ) -> None:
         self.dir_path = dir_path or settings.glossary.xml_dir
+        self.lemmatizer = lemmatizer if lemmatizer else Lemmatizer()
 
     def parse(self) -> list[GlossaryEntry]:
         # TODO: Update docstring
@@ -369,7 +381,8 @@ class GlossaryParser:
     def _get_updated_entries(
         self, old: list[GlossaryEntry], new: list[GlossaryEntry]
     ) -> list[GlossaryEntry]:
-        updater = GlossaryUpdater(old, new)
+        glossary_lemmatizer = GlossaryLemmatizer(lemmatizer=self.lemmatizer)
+        updater = GlossaryUpdater(old, new, glossary_lemmatizer)
         return updater.update()
 
     def _update_cache(
