@@ -10,6 +10,7 @@ import sys
 from typing import Literal
 
 from loguru import logger
+from openai.types import ReasoningEffort
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -41,9 +42,16 @@ class LLMSettings(BaseSettings):
         default="anthropic/claude-3.5-sonnet",
         description="Model to use for translation",
     )
-    temperature: float = Field(
-        default=0.1,
+    temperature: float | None = Field(
+        default=None,
         description="Temperature for translation (lower = more consistent/literal)",
+    )
+    reasoning_effort: ReasoningEffort = Field(
+        default=None,
+        description=(
+            "Reasoning effort for the thinking models. "
+            "If not provided, reasoning is not used."
+        ),
     )
 
 

@@ -11,7 +11,7 @@ class LLM:
         base_url: str,
         api_key: str,
         model: str,
-        temperature: float,
+        temperature: float | None,
         reasoning_effort: ReasoningEffort = None,
     ) -> None:
         self.base_url = base_url
