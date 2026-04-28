@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from xml.etree import ElementTree
 
@@ -260,7 +261,53 @@ class GlossaryUpdater:
         return self.apply_glossary_diff(diff)
 
 
-class GlossaryParser:
+class ProjectGlossaryParser:
+    def __init__(
+        self, project_glossary_file_path: Path, source_lang: Lang, target_lang: Lang
+    ) -> None:
+        self.file = project_glossary_file_path
+        self.source_lang = source_lang
+        self.target_lang = target_lang
+
+    def parse(self) -> list[GlossaryEntry]:
+        project_glossary: list[GlossaryEntry] = []
+        try:
+            with open(self.file, "r", encoding="utf-8") as f:
+                for idx, line in enumerate(f):
+                    line = line.strip()
+
+                    # Skip empty lines and comments
+                    if not line or line.startswith("#"):
+                        continue
+
+                    # Parse "term = translation"
+                    parts = line.split("=", 1)
+                    if len(parts) != 2:
+                        continue
+
+                    # Parse separate terms accounting for synonyms
+                    terms: list[Term] = []
+                    for i, part in enumerate(parts):
+                        synonyms = [s.strip() for s in re.split(r"[;|]", part)]
+                        for syn in synonyms:
+                            lg = self.source_lang if i == 0 else self.target_lang
+                            terms.append(Term(language=lg, value=syn))
+
+                    # Construct the entry and add to the final list
+                    entry = GlossaryEntry(id=idx, terms=frozenset(terms))
+                    project_glossary.append(entry)
+
+        except FileNotFoundError:
+            # TODO: Add proper warning logging
+            pass
+        except Exception:
+            # TODO: Add proper warning logging
+            pass
+
+        return project_glossary
+
+
+class MainGlossaryParser:
     def __init__(
         self, dir_path: str | Path, lemmatizer: Lemmatizer | None = None
     ) -> None:
