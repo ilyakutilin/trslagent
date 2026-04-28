@@ -28,8 +28,15 @@ class GlossaryEntry:
         self.id = id
         self.terms = terms
 
-    def stringify_lang(self, lang: Lang) -> str:
-        return " | ".join([t.value for t in self.terms if t.language == lang])
+    def stringify(self, source_lang: Lang, target_lang: Lang) -> str | None:
+        entry_langs = {t.language.pt1 for t in self.terms}
+        requested_langs = {source_lang.pt1, target_lang.pt1}
+        if entry_langs != requested_langs:
+            return None
+
+        source = " | ".join([t.value for t in self.terms if t.language == source_lang])
+        target = " | ".join([t.value for t in self.terms if t.language == target_lang])
+        return " = ".join((source, target))
 
     def __eq__(self, other):
         if not isinstance(other, GlossaryEntry):
