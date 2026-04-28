@@ -6,584 +6,101 @@ Translates large documents using:
 - OpenRouter API for LLM translation
 """
 
-import time
-from typing import Dict, Optional
+from iso639 import Lang
 
-from openai import (
-    APIConnectionError,
-    APITimeoutError,
-    OpenAI,  # OpenRouter is OpenAI-compatible
-    RateLimitError,
-)
-from openai.types.chat import ChatCompletionMessageParam
-
-from src.config import get_settings, logger
-from src.glossary_mgr_emb import GlossaryEmbeddingManager
-from src.splitter import CHUNK_OVERLAP, split_text
+from src.config import get_settings
+from src.glossary_matcher import TermMatcher
+from src.lemmatizer import Lemmatizer
+from src.llm import LLM
+from src.models import GlossaryEntry, Term
+from src.splitter import split_text, stitch_chunks
 
 # ── Configuration ────────────────────────────────────────────────────────────
 
 settings = get_settings()
 
 
-# ── OpenRouter client (OpenAI-compatible) ────────────────────────────────────
+class Translator:
+    def __init__(
+        self,
+        source_lang: Lang,
+        target_lang: Lang,
+        specialized_in: str | None,
+        text: str,
+        doc_type: str | None,
+        doc_title: str | None,
+        llm: LLM,
+        lemmatizer: Lemmatizer,
+        main_glossary_entries: list[GlossaryEntry],
+        project_glossary_entries: list[GlossaryEntry],
+    ) -> None:
+        self.source_lang = source_lang
+        self.target_lang = target_lang
+        self.specialized_in = specialized_in
+        self.text = text
+        self.doc_type = doc_type
+        self.doc_title = doc_title
+        self.llm = llm
+        self.lemmatizer = lemmatizer
+        self.main_glossary_entries = main_glossary_entries
+        self.project_glossary_entries = project_glossary_entries
 
+    def _match_main_glossary_entries_for_chunk(self, chunk: str) -> list[GlossaryEntry]:
+        return []
 
-def get_llm_client() -> OpenAI:
-    if not settings.llm.api_key:
-        raise ValueError("Set the OPENROUTER_API_KEY environment variable.")
-    return OpenAI(
-        base_url="https://openrouter.ai/api/v1",
-        api_key=settings.llm.api_key,
-    )
+    def _combine_glossaries_for_chunk(
+        self,
+        chunk: str,
+        chunk_glossary_entries: list[GlossaryEntry],
+        project_glossary_entries: list[GlossaryEntry],
+    ) -> dict[str, str]:
+        return {"": ""}
 
-
-# ── Glossary override ──────────────────────────────────────────────────────────
-
-
-def parse_glossary_override(override_path: str) -> Dict[str, str]:
-    """
-    Parse a glossary override file.
-
-    Format: one term per line in format "term = translation"
-    Lines starting with # are treated as comments.
-    Blank lines are ignored.
-
-    Returns a dict mapping source_term -> target_term
-    """
-    overrides = {}
-    try:
-        with open(override_path, "r", encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                # Skip empty lines and comments
-                if not line or line.startswith("#"):
-                    continue
-                # Parse "term = translation"
-                if "=" in line:
-                    parts = line.split("=", 1)
-                    if len(parts) == 2:
-                        source = parts[0].strip()
-                        target = parts[1].strip()
-                        if source and target:
-                            overrides[source] = target
-    except FileNotFoundError:
-        logger.warning(f"Glossary override file not found: {override_path}")
-    except Exception as e:
-        logger.error(f"Error reading glossary override file: {e}")
-    return overrides
-
-
-def apply_glossary_override(
-    glossary_terms: list[dict], overrides: Dict[str, str], chunk: str
-) -> list[dict]:
-    """
-    Apply glossary overrides to retrieved terms.
-
-    - ALL override terms are unconditionally included in the prompt
-    - If a term appears in both override and retrieved glossary, use override
-    - Retrieved terms are filtered by chunk content (unless overridden)
-
-    Returns the final list of terms to send to LLM.
-    """
-    if not overrides:
-        return glossary_terms
-
-    # Build a lookup from retrieved terms by source (case-insensitive)
-    retrieved_by_source: Dict[str, dict] = {}
-    for term_dict in glossary_terms:
-        source_key = "source"
-        if "term" in term_dict and source_key not in term_dict:
-            source_key = "term"
-        elif "source_term" in term_dict and source_key not in term_dict:
-            source_key = "source_term"
-
-        if source_key in term_dict:
-            source_lower = str(term_dict[source_key]).lower()
-            # Store with lowercase key for case-insensitive matching
-            retrieved_by_source[source_lower] = term_dict
-
-    # Build final terms list
-    final_terms: list[dict] = []
-    seen_sources: set[str] = set()
-
-    # First, add ALL override terms unconditionally (mark them as from override)
-    for override_src, override_tgt in overrides.items():
-        override_src_lower = override_src.lower()
-        # Check if this source was already added from retrieved terms
-        if override_src_lower not in seen_sources:
-            final_terms.append(
-                {"source": override_src, "target": override_tgt, "from_override": True}
-            )
-            seen_sources.add(override_src_lower)
-
-    # Then, add retrieved terms that aren't overridden and appear in chunk
-    chunk_lower = chunk.lower()
-    for term_dict in glossary_terms:
-        # TODO: Why do we need this check for a source key if the glossary dict
-        # is generated by the glossary manager via retrieve() and this method
-        # has only one option for the source key which is "source"?
-        source_key = "source"
-        if "term" in term_dict and source_key not in term_dict:
-            source_key = "term"
-        elif "source_term" in term_dict and source_key not in term_dict:
-            source_key = "source_term"
-
-        if source_key not in term_dict:
-            continue
-
-        source_term = str(term_dict[source_key])
-        source_lower = source_term.lower()
-
-        # Skip if this term is overridden
-        if any(override_src.lower() == source_lower for override_src in overrides):
-            continue
-
-        # Check if source term appears in chunk
-        if source_lower in chunk_lower and source_lower not in seen_sources:
-            final_terms.append(term_dict)
-            seen_sources.add(source_lower)
-
-    return final_terms
-
-
-# ── Translation prompt ────────────────────────────────────────────────────────
-
-
-def build_system_prompt(source_lang: str, target_lang: str) -> str:
-    """
-    Builds the system prompt with translation instructions and rules.
-    This is shared across all translations.
-    """
-    return f"""You are a professional translator.
-Translate text from {source_lang} to {target_lang}.
-Rules:
-  1. Use the mandatory glossary terms exactly as specified.
-  2. Preserve formatting, paragraph breaks, and punctuation.
-  3. Do not add explanations or commentary — output ONLY the translated text.
-  4. Maintain the tone and style of the original."""
-
-
-def build_user_prompt(
-    chunk: str,
-    source_lang: str,
-    target_lang: str,
-    glossary_terms: list[dict],
-    previous_translated: Optional[str] = None,
-    glossary_override: Optional[Dict[str, str]] = None,
-) -> str:
-    """
-    Builds the user prompt with chunk-specific content:
-    - Glossary terms (retrieved via RAG, optionally overridden)
-    - Optional previous segment tail for context continuity
-    - The text to translate
-    """
-    # Apply glossary override if provided
-    if glossary_override:
-        glossary_terms = apply_glossary_override(
-            glossary_terms, glossary_override, chunk
-        )
-
-    # Build glossary section
-    glossary_section = ""
-    if glossary_terms:
-        # Filter terms to only include those that appear in the chunk text
-        # Override terms are always included (they're marked with "from_override": True)
-        # We use partial matching to catch terms that are substrings or variations
-        # This prevents including irrelevant glossary terms and reduces prompt size
-        filtered_terms = []
-        chunk_lower = chunk.lower()
-
-        for term_dict in glossary_terms:
-            # Handle different possible key names for source term
-            source_key = "source"
-            if "term" in term_dict and source_key not in term_dict:
-                source_key = "term"
-            elif "source_term" in term_dict and source_key not in term_dict:
-                source_key = "source_term"
-
-            if source_key not in term_dict:
-                continue  # Skip invalid entry
-
-            # Check if source term appears in chunk (case-insensitive partial match)
-            source_term = str(term_dict[source_key])
-
-            # Override terms are always included regardless of chunk content
-            if term_dict.get("from_override", False):
-                filtered_terms.append(term_dict)
-            elif source_term.lower() in chunk_lower:
-                filtered_terms.append(term_dict)
-
-        if filtered_terms:
-            lines = [f"  {t['source']} → {t['target']}" for t in filtered_terms]
-            glossary_section = (
-                "\n\nMANDATORY GLOSSARY (you MUST use these translations exactly as given, "
-                "do not paraphrase or substitute them):\n" + "\n".join(lines)
-            )
-
-    # Build context section with previous translated segment
-    context_section = ""
-    if previous_translated:
-        # Pass only the tail of the previous chunk to save tokens
-        tail = _truncate_at_sentence_boundary(previous_translated, window=400)
-        context_section = f"\n\nPREVIOUS SEGMENT (for context and style continuity — do NOT retranslate this):\n{tail}"
-
-    # Combine all sections
-    prompt = (
-        f"Translate the following text from {source_lang} to {target_lang}:\n"
-        f"{glossary_section}"
-        f"{context_section}"
-        f"\n\nTEXT TO TRANSLATE:\n{chunk}"
-    )
-    return prompt
-
-
-# ── Core translation logic ────────────────────────────────────────────────────
-
-
-def translate_chunk(
-    client: OpenAI,
-    chunk: str,
-    source_lang: str,
-    target_lang: str,
-    glossary_terms: list[dict],
-    previous_translated: Optional[str],
-    model: str = settings.llm.model,
-    glossary_override: Optional[Dict[str, str]] = None,
-) -> str:
-    # Retry logic with exponential backoff for API errors
-    max_retries = 5
-    base_delay = 1.0  # seconds
-
-    for attempt in range(max_retries):
-        try:
-            messages: list[ChatCompletionMessageParam] = [
-                {
-                    "role": "system",
-                    "content": build_system_prompt(source_lang, target_lang),
-                },
-                {
-                    "role": "user",
-                    "content": build_user_prompt(
-                        chunk,
-                        source_lang,
-                        target_lang,
-                        glossary_terms,
-                        previous_translated,
-                        glossary_override,
-                    ),
-                },
-            ]
-            response = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                temperature=0.1,  # low temperature = more consistent/literal translation
-            )
-            content = response.choices[0].message.content
-            if content is None:
-                raise ValueError("Translation failed: received empty response from API")
-            return content.strip()
-
-        # Handle timeouts (must be caught before APIConnectionError since it's a subclass)
-        except APITimeoutError as e:
-            if attempt == max_retries - 1:
-                raise RuntimeError(
-                    f"Request timed out after {max_retries} retries. "
-                    f"The API is taking too long to respond.\n"
-                    f"Original error: {str(e)}"
-                )
-            wait_time = base_delay * (2**attempt)  # exponential backoff
-            if attempt < max_retries - 1:
-                time.sleep(wait_time)
-            continue
-
-        # Handle rate limiting (429)
-        except RateLimitError as e:
-            if attempt == max_retries - 1:
-                raise RuntimeError(
-                    f"Rate limit exceeded after {max_retries} retries. "
-                    f"Please wait a moment and try again.\n"
-                    f"Original error: {str(e)}"
-                )
-            wait_time = base_delay * (2**attempt)  # exponential backoff
-            if attempt < max_retries - 1:
-                time.sleep(wait_time)
-            continue
-
-        # Handle network/connection errors
-        except APIConnectionError as e:
-            if attempt == max_retries - 1:
-                raise RuntimeError(
-                    f"Network error after {max_retries} retries. "
-                    f"Please check your internet connection and try again.\n"
-                    f"Original error: {str(e)}"
-                )
-            wait_time = base_delay * (2**attempt)
-            if attempt < max_retries - 1:
-                time.sleep(wait_time)
-            continue
-
-        # Handle other errors (not retried)
-        except Exception as e:
-            # Re-raise any other exceptions without retrying
-            raise RuntimeError(f"Translation failed: {str(e)}") from e
-
-    # Fallback: should never reach here due to exception handling, but satisfies type checker
-    return ""
-
-
-def stitch_chunks(
-    translated_chunks: list[str], overlap_chars: int = CHUNK_OVERLAP * 4
-) -> str:
-    """
-    Joins translated chunks. Because of overlap, the tail of chunk N and the
-    head of chunk N+1 may be near-duplicate sentences. This does a simple
-    deduplication heuristic at the seams.
-    """
-    if not translated_chunks:
+    def _build_system_prompt(
+        self,
+        is_extract: bool,
+        previous_translated: str | None,
+        chunk_glossary: dict[str, str] | None,
+    ) -> str:
         return ""
-    result = translated_chunks[0]
-    for chunk in translated_chunks[1:]:
-        # Find the longest suffix of `result` that appears at start of `chunk`
-        overlap_window = result[-overlap_chars:]
-        seam = _find_seam(overlap_window, chunk)
-        result += "\n" + chunk[seam:]
-    return result
 
+    def _build_user_prompt(
+        self,
+    ) -> str:
+        return ""
 
-def _find_seam(tail: str, head: str) -> int:
-    """
-    Returns the character offset in `head` where unique content begins,
-    i.e. skips any content that is duplicated from `tail`.
-    Tries progressively smaller suffixes of `tail` against the prefix of `head`.
-    """
-    words = tail.split()
-    # Try matching the last N words of tail against start of head
-    for n in range(min(20, len(words)), 2, -1):
-        snippet = " ".join(words[-n:])
-        idx = head.find(snippet)
-        if idx != -1:
-            return idx + len(snippet)
-    return 0  # no overlap found, just concatenate
-
-
-def _truncate_at_sentence_boundary(text: str, window: int = 400) -> str:
-    """
-    Truncates text at the last sentence or paragraph boundary within a character window.
-
-    Args:
-        text: The text to potentially truncate
-        window: Maximum characters to consider from the end
-
-    Returns:
-        Text truncated at the last sentence/paragraph boundary, or up to `window`
-        characters if no boundary is found.
-    """
-    # Take the last N characters to consider
-    if len(text) <= window:
-        return text.strip()
-
-    tail = text[-window:]
-
-    # Sentence boundaries: period, exclamation mark, question mark, or double newline
-    boundary_markers = [(". ", "! ", "? "), ("\n\n", "\n\n"), "\n"]
-
-    # Find the last occurrence of any boundary marker
-    last_boundary_idx = -1
-    for marker in boundary_markers:
-        idx = tail.rfind(marker)
-        if idx != -1:
-            last_boundary_idx = max(last_boundary_idx, idx + len(marker))
-
-    # If we found a boundary, truncate there; otherwise use full window
-    if last_boundary_idx > 0:
-        truncated = text[-window:-last_boundary_idx]
-    else:
-        truncated = tail.strip()
-
-    return truncated
-
-
-# ── Main entry point ──────────────────────────────────────────────────────────
-
-
-def print_prompts_only(
-    text: str,
-    source_lang: str,
-    target_lang: str,
-    glossary_manager: GlossaryEmbeddingManager,
-    model: str = settings.llm.model,
-    glossary_override: Optional[Dict[str, str]] = None,
-) -> None:
-    """
-    Print prompts that would be sent to the LLM without actually calling the API.
-    Useful for debugging and inspecting what would be sent.
-    """
-    # Step 1: Split
-    chunks = split_text(text)
-
-    logger.info(f"Split into {len(chunks)} chunks.")
-
-    # Step 2: Build prompts for each chunk
-    previous_translated = None
-
-    for i, chunk in enumerate(chunks):
-        logger.info(f"Building prompts for chunk {i + 1}/{len(chunks)}...")
-
-        # Retrieve relevant glossary terms for this chunk
-        glossary_terms = glossary_manager.retrieve(
-            query_text=chunk,
-            source_lang=source_lang,
-            target_lang=target_lang,
-            top_k=settings.glossary.top_k,
+    def translate_document(self) -> str:
+        chunks: list[str] = split_text(
+            text=self.text,
+            chunk_size=settings.chunk.size,
+            chunk_overlap=settings.chunk.overlap,
         )
 
-        # Build prompts
-        system_prompt = build_system_prompt(source_lang, target_lang)
-        user_prompt = build_user_prompt(
-            chunk,
-            source_lang,
-            target_lang,
-            glossary_terms,
-            previous_translated,
-            glossary_override,
-        )
+        translated_chunks: list[str] = []
+        previous_translated = None
 
-        # Print prompts
-        print(f"\n{'=' * 60}")
-        print(f"=== CHUNK {i + 1} ===")
-        print(f"{'=' * 60}")
-        print(f"\n--- SYSTEM PROMPT ---\n{system_prompt}")
-        print(f"\n--- USER PROMPT ---\n{user_prompt}")
-
-        # Update previous_translated for next chunk context
-        previous_translated = user_prompt
-
-    logger.info(f"Printed prompts for {len(chunks)} chunks.")
-
-
-def translate_document(
-    text: str,
-    source_lang: str,
-    target_lang: str,
-    glossary_manager: GlossaryEmbeddingManager,
-    model: str = settings.llm.model,
-    glossary_override: Optional[Dict[str, str]] = None,
-) -> str:
-    """
-    Full pipeline:
-      1. Split text into safe chunks
-      2. For each chunk: retrieve relevant glossary terms, translate
-      3. Stitch chunks back together
-    """
-    client = get_llm_client()
-
-    # Step 1: Split
-    chunks = split_text(text)
-
-    logger.info(f"Split into {len(chunks)} chunks.")
-
-    # Step 2: Translate chunk by chunk
-    translated_chunks = []
-    previous_translated = None
-
-    for i, chunk in enumerate(chunks):
-        logger.info(f"Translating chunk {i + 1}/{len(chunks)}...")
-
-        # Retrieve relevant glossary terms for this chunk
-        glossary_terms = glossary_manager.retrieve(
-            query_text=chunk,
-            source_lang=source_lang,
-            target_lang=target_lang,
-            top_k=settings.glossary.top_k,
-        )
-
-        translated = translate_chunk(
-            client=client,
-            chunk=chunk,
-            source_lang=source_lang,
-            target_lang=target_lang,
-            glossary_terms=glossary_terms,
-            previous_translated=previous_translated,
-            model=model,
-            glossary_override=glossary_override,
-        )
-        translated_chunks.append(translated)
-        previous_translated = translated
-
-    # Step 3: Stitch
-    result = stitch_chunks(translated_chunks)
-    logger.info("Translation complete.")
-    return result
-
-
-# ── CLI ───────────────────────────────────────────────────────────────────────
-
-if __name__ == "__main__":
-    import argparse
-
-    parser = argparse.ArgumentParser(description="AI Translation Agent")
-    parser.add_argument("input_file", help="Path to the text file to translate")
-    parser.add_argument("source_lang", help="Source language (e.g. 'English')")
-    parser.add_argument("target_lang", help="Target language (e.g. 'German')")
-    parser.add_argument(
-        "--glossary", default="glossary.csv", help="Path to glossary CSV file"
-    )
-    parser.add_argument(
-        "--glossary-override",
-        help="Path to glossary override file (format: 'term = translation')",
-    )
-    parser.add_argument(
-        "--sync-glossary",
-        action="store_true",
-        help="Sync glossary (add/update/delete terms) instead of just loading",
-    )
-    parser.add_argument("--output", default="translated.txt", help="Output file path")
-    parser.add_argument(
-        "--model", default=settings.llm.model, help="OpenRouter model string"
-    )
-    parser.add_argument(
-        "--print-prompt-only",
-        action="store_true",
-        help="Only print the prompts that would be sent to the LLM without actually calling it",
-    )
-    args = parser.parse_args()
-
-    with open(args.input_file, "r", encoding="utf-8") as f:
-        text = f.read()
-
-    gm = GlossaryEmbeddingManager()
-    gm.sync_glossary(args.glossary, sync_mode=args.sync_glossary)
-
-    # Parse glossary override if provided
-    glossary_override = None
-    if args.glossary_override:
-        glossary_override = parse_glossary_override(args.glossary_override)
-        if glossary_override:
-            logger.info(
-                f"Loaded {len(glossary_override)} glossary override(s) from {args.glossary_override}"
+        for chunk in chunks:
+            matched_entries = self._match_main_glossary_entries_for_chunk(chunk)
+            chunk_glossary = self._combine_glossaries_for_chunk(
+                chunk=chunk,
+                chunk_glossary_entries=matched_entries,
+                project_glossary_entries=self.project_glossary_entries,
             )
 
-    if args.print_prompt_only:
-        print_prompts_only(
-            text=text,
-            source_lang=args.source_lang,
-            target_lang=args.target_lang,
-            glossary_manager=gm,
-            model=args.model,
-            glossary_override=glossary_override,
-        )
-    else:
-        result = translate_document(
-            text=text,
-            source_lang=args.source_lang,
-            target_lang=args.target_lang,
-            glossary_manager=gm,
-            model=args.model,
-            glossary_override=glossary_override,
-        )
+            system_prompt = self._build_system_prompt(
+                is_extract=len(chunks) > 1,
+                previous_translated=previous_translated,
+                chunk_glossary=chunk_glossary,
+            )
+            user_prompt = self._build_user_prompt()
+            translated_chunk = self.llm.get_reply(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+            )
 
-        with open(args.output, "w", encoding="utf-8") as f:
-            f.write(result)
+            translated_chunks.append(translated_chunk)
+            previous_translated = translated_chunk
 
-        logger.info(f"Saved to {args.output}")
+        result = stitch_chunks(translated_chunks, chunk_overlap=settings.chunk.overlap)
+
+        return result
