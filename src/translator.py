@@ -29,7 +29,7 @@ class Translator:
         text: str,
         doc_type: str | None,
         doc_title: str | None,
-        llm: LLM,
+        llm: LLM | None,
         lemmatizer: Lemmatizer,
         main_glossary_entries: list[GlossaryEntry],
         project_glossary_entries: list[GlossaryEntry],
@@ -139,7 +139,15 @@ class Translator:
     def _build_user_prompt(self, chunk: str) -> str:
         return f"Text for translation:\n{chunk}"
 
-    def translate_document(self) -> str:
+    def _print_prompts(self, system_prompt: str, user_prompt: str) -> None:
+        print(f"\n{'=' * 10} SYSTEM PROMPT {'=' * 10}")
+        print(system_prompt)
+        print("=" * 35 + "\n" * 2)
+        print(f"{'=' * 11} USER PROMPT {'=' * 11}")
+        print(user_prompt)
+        print("=" * 35 + "\n")
+
+    def translate_document(self) -> str | None:
         chunks: list[str] = split_text(
             text=self.text,
             chunk_size=settings.chunk.size,
@@ -164,6 +172,11 @@ class Translator:
                 chunk_glossary=chunk_glossary_str,
             )
             user_prompt = self._build_user_prompt(chunk)
+
+            if self.llm is None:
+                self._print_prompts(system_prompt, user_prompt)
+                return None
+
             translated_chunk = self.llm.get_reply(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
