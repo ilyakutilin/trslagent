@@ -9,10 +9,10 @@ Translates large documents using:
 from iso639 import Lang
 
 from src.config import get_settings
-from src.glossary_matcher import TermMatcher
+from src.glossary.matcher import TermMatcher
+from src.glossary.models import GlossaryEntry
 from src.lemmatizer import Lemmatizer
 from src.llm import LLM
-from src.models import GlossaryEntry
 from src.splitter import split_text, stitch_chunks, truncate_at_sentence_boundary
 
 # ── Configuration ────────────────────────────────────────────────────────────

@@ -1,8 +1,8 @@
 import ahocorasick
 from iso639 import Lang
 
+from src.glossary.models import GlossaryEntry, Term
 from src.lemmatizer import GlossaryLemmatizer, Lemmatizer
-from src.models import GlossaryEntry, Term
 
 
 class TermMatcher:
@@ -197,6 +197,7 @@ def example(lang: str) -> None:
     )
     for me in matched_entries:
         print(
+            # TODO: Fix glossary entry stringifying in matcher example
             me.to_string(
                 source_lang=Lang(lang), target_lang=Lang("ru" if lang == "en" else "en")
             )

@@ -2,7 +2,7 @@ import pickle
 from pathlib import Path
 
 from src.config import get_settings, logger
-from src.models import CachedEntries, GlossaryEntry, GlossaryFile
+from src.glossary.models import CachedEntries, GlossaryEntry, GlossaryFile
 
 settings = get_settings()
 

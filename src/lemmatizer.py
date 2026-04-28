@@ -4,7 +4,7 @@ import pymorphy3
 import spacy
 from iso639 import Lang
 
-from src.models import GlossaryEntry, Term
+from src.glossary.models import GlossaryEntry, Term
 
 
 class Lemmatizer:

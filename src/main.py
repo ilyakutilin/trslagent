@@ -3,9 +3,9 @@ from pathlib import Path
 from iso639 import Lang
 
 from src.config import get_settings
+from src.glossary.parser import MainGlossaryParser, ProjectGlossaryParser
 from src.lemmatizer import Lemmatizer
 from src.llm import LLM
-from src.parser import MainGlossaryParser, ProjectGlossaryParser
 from src.translator import Translator
 
 

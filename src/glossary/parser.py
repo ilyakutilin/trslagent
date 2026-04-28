@@ -6,9 +6,15 @@ from iso639 import Lang
 from iso639.exceptions import InvalidLanguageValue
 
 from src.config import get_settings, logger
-from src.glossary_cache import GlossaryCache
+from src.glossary.cache import GlossaryCache
+from src.glossary.models import (
+    CachedEntries,
+    GlossaryDiff,
+    GlossaryEntry,
+    GlossaryFile,
+    Term,
+)
 from src.lemmatizer import GlossaryLemmatizer, Lemmatizer
-from src.models import CachedEntries, GlossaryDiff, GlossaryEntry, GlossaryFile, Term
 
 settings = get_settings()
 
