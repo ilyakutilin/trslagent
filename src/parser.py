@@ -263,11 +263,16 @@ class GlossaryUpdater:
 
 class ProjectGlossaryParser:
     def __init__(
-        self, project_glossary_file_path: Path, source_lang: Lang, target_lang: Lang
+        self,
+        project_glossary_file_path: Path,
+        source_lang: Lang,
+        target_lang: Lang,
+        lemmatizer: Lemmatizer | None = None,
     ) -> None:
         self.file = project_glossary_file_path
         self.source_lang = source_lang
         self.target_lang = target_lang
+        self.lemmatizer = lemmatizer if lemmatizer else Lemmatizer()
 
     def parse(self) -> list[GlossaryEntry]:
         project_glossary: list[GlossaryEntry] = []
@@ -304,7 +309,9 @@ class ProjectGlossaryParser:
             # TODO: Add proper warning logging
             pass
 
-        return project_glossary
+        return GlossaryLemmatizer(lemmatizer=self.lemmatizer).lemmatize_entries(
+            entries=project_glossary
+        )
 
 
 class MainGlossaryParser:
