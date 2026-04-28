@@ -10,7 +10,7 @@ This module provides the core translation functionality that handles:
 
 from iso639 import Lang
 
-from src.config import get_settings
+from src.config import get_settings, logger
 from src.glossary.matcher import TermMatcher
 from src.glossary.models import GlossaryEntry
 from src.lemmatizer import Lemmatizer
@@ -64,10 +64,12 @@ class Translator:
             text: Full input text to be translated
             doc_type: Optional document type for context
             doc_title: Optional document title for context
-            llm: LLM instance for generating translations. If None, prompts will be printed only
+            llm: LLM instance for generating translations.
+                If None, prompts will be printed only
             lemmatizer: Lemmatizer instance for term normalization
             main_glossary_entries: Global glossary entries available for all documents
-            project_glossary_entries: Project-specific glossary entries (override main glossary)
+            project_glossary_entries: Project-specific glossary entries
+                (override main glossary)
         """
         self.source_lang = source_lang
         self.target_lang = target_lang
@@ -79,6 +81,16 @@ class Translator:
         self.lemmatizer = lemmatizer
         self.main_glossary_entries = main_glossary_entries
         self.project_glossary_entries = project_glossary_entries
+
+        logger.info(
+            f"Translator initialized: {source_lang} -> {target_lang}, "
+            f"specialized_in={specialized_in}, "
+            f"text_length={len(text)}, "
+            f"doc_type={doc_type}, doc_title={doc_title}, "
+            f"llm_available={llm is not None}, "
+            f"main_glossary_entries={len(main_glossary_entries)}, "
+            f"project_glossary_entries={len(project_glossary_entries)}"
+        )
 
     def _match_main_glossary_entries_for_chunk(
         self, chunk: str, matcher: TermMatcher
@@ -95,9 +107,14 @@ class Translator:
         Returns:
             List of GlossaryEntry objects that match terms in the chunk
         """
-        return matcher.match(
+        matched = matcher.match(
             text=chunk, lang=self.source_lang, lemmatizer=self.lemmatizer
         )
+        logger.debug(
+            f"Matched {len(matched)} main glossary entries "
+            f"for chunk of length {len(chunk)}"
+        )
+        return matched
 
     def _combine_glossaries_for_chunk(
         self,
@@ -133,6 +150,11 @@ class Translator:
             if to_include:
                 final_chunk_entries.append(ge)
 
+        logger.debug(
+            f"Combined glossaries: {len(chunk_glossary_entries)} main + "
+            f"{len(project_glossary_entries)} project = "
+            f"{len(final_chunk_entries)} total entries"
+        )
         return final_chunk_entries
 
     def _stringify_glossary(self, entries: list[GlossaryEntry]) -> str:
@@ -153,7 +175,11 @@ class Translator:
             if str_entry is not None:
                 str_entries.append(str_entry)
 
-        return "\n".join(str_entries)
+        result = "\n".join(str_entries)
+        logger.debug(
+            f"Stringified {len(entries)} glossary entries into {len(result)} characters"
+        )
+        return result
 
     def _build_system_prompt(
         self,
@@ -167,8 +193,10 @@ class Translator:
         glossary instructions, and previous translation segment for continuity.
 
         Args:
-            is_extract: True if chunk is part of a larger document, False for full document
-            previous_translated: Translated text from previous chunk for continuity context
+            is_extract: True if chunk is part of a larger document,
+                False for full document
+            previous_translated: Translated text from previous chunk for continuity
+                context
             chunk_glossary: Stringified glossary entries relevant for this chunk
 
         Returns:
@@ -212,7 +240,7 @@ class Translator:
         #     f"term = {self.target_lang} term format."
         # )
 
-        return (
+        result = (
             f"You are a professional experienced translator{specialization_section}. "
             "Your task is to translate the text provided by the user "
             f"from {self.source_lang} into {self.target_lang}."
@@ -220,6 +248,13 @@ class Translator:
             f"{glossary_section}"
             f"{context_section}"
         )
+        logger.debug(
+            f"Built system prompt with specialization={bool(self.specialized_in)}, "
+            f"doc_context={bool(text_description_section)}, "
+            f"glossary={bool(glossary_section)}, "
+            f"context={bool(context_section)}"
+        )
+        return result
 
     def _build_user_prompt(self, chunk: str) -> str:
         """Construct user prompt containing the text to be translated.
@@ -230,7 +265,9 @@ class Translator:
         Returns:
             Formatted user prompt string
         """
-        return f"Text for translation:\n{chunk}"
+        result = f"Text for translation:\n{chunk}"
+        logger.debug(f"Built user prompt with chunk length {len(chunk)}")
+        return result
 
     def _print_prompts(self, system_prompt: str, user_prompt: str) -> None:
         """Print constructed prompts to console for debugging purposes.
@@ -260,10 +297,17 @@ class Translator:
             Fully translated document string if LLM is available, None if only
             prompts were printed (when LLM instance is not provided)
         """
+        logger.info(f"Starting document translation: text length {len(self.text)}")
+
         chunks: list[str] = split_text(
             text=self.text,
             chunk_size=settings.chunk.size,
             chunk_overlap=settings.chunk.overlap,
+        )
+
+        logger.info(
+            f"Split text into {len(chunks)} chunks (size={settings.chunk.size}, "
+            f"overlap={settings.chunk.overlap})"
         )
 
         translated_chunks: list[str] = []
@@ -271,7 +315,9 @@ class Translator:
 
         chunk_is_extract = len(chunks) > 1
         term_matcher = TermMatcher(glossary_entries=self.main_glossary_entries)
-        for chunk in chunks:
+        for i, chunk in enumerate(chunks):
+            logger.info(f"Processing chunk {i + 1}/{len(chunks)} (length={len(chunk)})")
+
             # TODO: Implement matching project glossary for current chunk
             matched_entries = self._match_main_glossary_entries_for_chunk(
                 chunk=chunk, matcher=term_matcher
@@ -290,18 +336,27 @@ class Translator:
             user_prompt = self._build_user_prompt(chunk)
 
             if self.llm is None:
+                logger.warning("LLM not available, printing prompts only")
                 self._print_prompts(system_prompt, user_prompt)
                 return None
 
             # TODO: Verify that the overall prompt is within reasonable limits
+            logger.debug(f"Sending chunk {i + 1} to LLM")
             translated_chunk = self.llm.get_reply(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
+            )
+            logger.debug(
+                f"Received translation for chunk {i + 1}: {len(translated_chunk)} "
+                "characters"
             )
 
             translated_chunks.append(translated_chunk)
             previous_translated = translated_chunk
 
         result = stitch_chunks(translated_chunks, chunk_overlap=settings.chunk.overlap)
+        logger.info(
+            f"Translation complete: {len(self.text)} -> {len(result)} characters"
+        )
 
         return result
