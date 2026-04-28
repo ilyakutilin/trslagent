@@ -262,9 +262,9 @@ class GlossaryUpdater:
 
 class GlossaryParser:
     def __init__(
-        self, dir_path: str | None = None, lemmatizer: Lemmatizer | None = None
+        self, dir_path: str | Path, lemmatizer: Lemmatizer | None = None
     ) -> None:
-        self.dir_path = dir_path or settings.glossary.xml_dir
+        self.dir_path = dir_path
         self.lemmatizer = lemmatizer if lemmatizer else Lemmatizer()
 
     def parse(self) -> list[GlossaryEntry]:
