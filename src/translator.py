@@ -46,7 +46,10 @@ class Translator:
         self.project_glossary_entries = project_glossary_entries
 
     def _match_main_glossary_entries_for_chunk(self, chunk: str) -> list[GlossaryEntry]:
-        return []
+        term_matcher = TermMatcher(glossary_entries=self.main_glossary_entries)
+        return term_matcher.match(
+            text=chunk, lang=self.source_lang, lemmatizer=self.lemmatizer
+        )
 
     def _combine_glossaries_for_chunk(
         self,
