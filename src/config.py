@@ -33,7 +33,10 @@ class LoggingSettings(BaseSettings):
 class LLMSettings(BaseSettings):
     """LLM/OpenRouter API settings"""
 
-    api_key: str = Field(default="", description="OpenRouter API key")
+    base_url: str = Field(
+        default="https://openrouter.ai/api/v1", description="LLM Base URL"
+    )
+    api_key: str = Field(default="", description="LLM API key")
     model: str = Field(
         default="anthropic/claude-3.5-sonnet",
         description="Model to use for translation",
