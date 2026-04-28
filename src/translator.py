@@ -136,10 +136,8 @@ class Translator:
             f"{context_section}"
         )
 
-    def _build_user_prompt(
-        self,
-    ) -> str:
-        return ""
+    def _build_user_prompt(self, chunk: str) -> str:
+        return f"Text for translation:\n{chunk}"
 
     def translate_document(self) -> str:
         chunks: list[str] = split_text(
@@ -165,7 +163,7 @@ class Translator:
                 previous_translated=previous_translated,
                 chunk_glossary=chunk_glossary_str,
             )
-            user_prompt = self._build_user_prompt()
+            user_prompt = self._build_user_prompt(chunk)
             translated_chunk = self.llm.get_reply(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
