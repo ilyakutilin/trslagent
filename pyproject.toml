@@ -5,7 +5,6 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "chromadb>=1.5.7",
     "iso639-lang>=2.6.3",
     "langchain-text-splitters>=1.1.1",
     "loguru>=0.7.0",
@@ -13,7 +12,5 @@ dependencies = [
     "pyahocorasick>=2.3.0",
     "pydantic-settings>=2.1.0",
     "pymorphy3>=2.0.6",
-    "sentence-transformers>=5.4.0",
     "spacy>=3.8.14",
-    "torch>=2.11.0",
 ]
