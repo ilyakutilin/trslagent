@@ -1,9 +1,11 @@
-"""
-AI Translation Agent
-====================
-Translates large documents using:
-- ChromaDB + multilingual-e5-large for glossary RAG
-- OpenRouter API for LLM translation
+"""Document translation service with glossary-aware LLM-based translation.
+
+This module provides the core translation functionality that handles:
+- Chunking large documents for efficient LLM processing
+- Glossary matching and term consistency enforcement
+- Context-aware prompt construction
+- Translation continuity between document segments
+- Glossary priority handling (project glossary overrides main glossary)
 """
 
 from iso639 import Lang
@@ -21,6 +23,25 @@ settings = get_settings()
 
 
 class Translator:
+    """Main translator orchestrator for document translation with glossary support.
+
+    Handles the complete translation workflow including text chunking, glossary matching,
+    prompt construction, LLM interaction, and result stitching. Maintains translation
+    consistency across document segments and enforces glossary term usage.
+
+    Attributes:
+        source_lang: Source language for translation
+        target_lang: Target language for translation
+        specialized_in: Optional domain specialization for translator persona
+        text: Full input text to be translated
+        doc_type: Optional document type for context (e.g. "technical manual", "legal document")
+        doc_title: Optional document title for context
+        llm: LLM instance for generating translations. If None, will only output prompts
+        lemmatizer: Lemmatizer instance for term normalization
+        main_glossary_entries: Global glossary entries available for all documents
+        project_glossary_entries: Project-specific glossary entries with higher priority
+    """
+
     def __init__(
         self,
         source_lang: Lang,
@@ -34,6 +55,20 @@ class Translator:
         main_glossary_entries: list[GlossaryEntry],
         project_glossary_entries: list[GlossaryEntry],
     ) -> None:
+        """Initialize Translator instance with configuration and dependencies.
+
+        Args:
+            source_lang: Source language for translation
+            target_lang: Target language for translation
+            specialized_in: Optional domain specialization for translator persona
+            text: Full input text to be translated
+            doc_type: Optional document type for context
+            doc_title: Optional document title for context
+            llm: LLM instance for generating translations. If None, prompts will be printed only
+            lemmatizer: Lemmatizer instance for term normalization
+            main_glossary_entries: Global glossary entries available for all documents
+            project_glossary_entries: Project-specific glossary entries (override main glossary)
+        """
         self.source_lang = source_lang
         self.target_lang = target_lang
         self.specialized_in = specialized_in
@@ -45,9 +80,22 @@ class Translator:
         self.main_glossary_entries = main_glossary_entries
         self.project_glossary_entries = project_glossary_entries
 
-    def _match_main_glossary_entries_for_chunk(self, chunk: str) -> list[GlossaryEntry]:
-        term_matcher = TermMatcher(glossary_entries=self.main_glossary_entries)
-        return term_matcher.match(
+    def _match_main_glossary_entries_for_chunk(
+        self, chunk: str, matcher: TermMatcher
+    ) -> list[GlossaryEntry]:
+        """Find main glossary entries that appear in a specific text chunk.
+
+        Uses the provided term matcher to identify relevant glossary terms
+        present in the chunk text, with lemmatization for better matching.
+
+        Args:
+            chunk: Text chunk to search for glossary terms
+            matcher: TermMatcher instance initialized with main glossary entries
+
+        Returns:
+            List of GlossaryEntry objects that match terms in the chunk
+        """
+        return matcher.match(
             text=chunk, lang=self.source_lang, lemmatizer=self.lemmatizer
         )
 
@@ -56,6 +104,19 @@ class Translator:
         chunk_glossary_entries: list[GlossaryEntry],
         project_glossary_entries: list[GlossaryEntry],
     ) -> list[GlossaryEntry]:
+        """Combine main and project glossaries with priority resolution.
+
+        Project glossary entries take precedence. Any term present in both
+        glossaries will be taken only from the project glossary to avoid conflicts.
+
+        Args:
+            chunk_glossary_entries: Main glossary entries matched for current chunk
+            project_glossary_entries: Project-specific glossary entries
+
+        Returns:
+            Combined list of glossary entries without conflicting terms
+        """
+        # TODO: Cache lemmatized_project_terms - no need to parse them for every chunk
         lemmatized_project_terms: list[str] = []
         for ge in project_glossary_entries:
             for term in [t for t in ge.terms if t.language == self.source_lang]:
@@ -75,6 +136,17 @@ class Translator:
         return final_chunk_entries
 
     def _stringify_glossary(self, entries: list[GlossaryEntry]) -> str:
+        """Convert glossary entries list to human-readable string format for prompts.
+
+        Formats each glossary entry with source and target language terms,
+        suitable for inclusion in LLM prompts.
+
+        Args:
+            entries: List of GlossaryEntry objects to stringify
+
+        Returns:
+            Newline-separated string of formatted glossary entries
+        """
         str_entries: list[str] = []
         for entry in entries:
             str_entry = entry.stringify(self.source_lang, self.target_lang)
@@ -89,16 +161,29 @@ class Translator:
         previous_translated: str | None,
         chunk_glossary: str | None,
     ) -> str:
+        """Construct system prompt for LLM translation request.
+
+        Builds a context-rich prompt including translator persona, document context,
+        glossary instructions, and previous translation segment for continuity.
+
+        Args:
+            is_extract: True if chunk is part of a larger document, False for full document
+            previous_translated: Translated text from previous chunk for continuity context
+            chunk_glossary: Stringified glossary entries relevant for this chunk
+
+        Returns:
+            Complete system prompt string ready for LLM
+        """
         specialization_section = (
             f" specialized in {self.specialized_in}" if self.specialized_in else ""
         )
 
-        text_descriprion_section = ""
+        text_description_section = ""
         if any((self.doc_type, self.doc_title)):
             an_extract_from = " an extract from" if is_extract else ""
             doc_type = self.doc_type if self.doc_type else "document"
             titled = f" titled '{self.doc_title}'" if self.doc_title else ""
-            text_descriprion_section = (
+            text_description_section = (
                 f"\nThe text for translation is {an_extract_from}a {doc_type}{titled}."
             )
 
@@ -107,7 +192,7 @@ class Translator:
             glossary_section = (
                 "\nUse the following dictionary when translating. If a term is in the "
                 "dictionary, its translation shall be taken from the dictionary.\n"
-                "<dictionary start>\n{chunk_glossary}\n<dictionary end>"
+                f"<dictionary start>\n{chunk_glossary}\n<dictionary end>"
             )
 
         context_section = ""
@@ -131,15 +216,32 @@ class Translator:
             f"You are a professional experienced translator{specialization_section}. "
             "Your task is to translate the text provided by the user "
             f"from {self.source_lang} into {self.target_lang}."
-            f"{text_descriprion_section}"
+            f"{text_description_section}"
             f"{glossary_section}"
             f"{context_section}"
         )
 
     def _build_user_prompt(self, chunk: str) -> str:
+        """Construct user prompt containing the text to be translated.
+
+        Args:
+            chunk: Text chunk to be translated
+
+        Returns:
+            Formatted user prompt string
+        """
         return f"Text for translation:\n{chunk}"
 
     def _print_prompts(self, system_prompt: str, user_prompt: str) -> None:
+        """Print constructed prompts to console for debugging purposes.
+
+        Formats and displays system and user prompts with clear separators.
+
+        Args:
+            system_prompt: System prompt string to print
+            user_prompt: User prompt string to print
+        """
+        # TODO: Add chunk identification
         print(f"\n{'=' * 10} SYSTEM PROMPT {'=' * 10}")
         print(system_prompt)
         print("=" * 35 + "\n" * 2)
@@ -148,6 +250,16 @@ class Translator:
         print("=" * 35 + "\n")
 
     def translate_document(self) -> str | None:
+        """Execute full document translation workflow.
+
+        Splits document into chunks, processes each chunk with glossary matching and
+        context-aware translation, then stitches translated chunks back together.
+        Maintains translation continuity between adjacent chunks.
+
+        Returns:
+            Fully translated document string if LLM is available, None if only
+            prompts were printed (when LLM instance is not provided)
+        """
         chunks: list[str] = split_text(
             text=self.text,
             chunk_size=settings.chunk.size,
@@ -158,8 +270,12 @@ class Translator:
         previous_translated = None
 
         chunk_is_extract = len(chunks) > 1
+        term_matcher = TermMatcher(glossary_entries=self.main_glossary_entries)
         for chunk in chunks:
-            matched_entries = self._match_main_glossary_entries_for_chunk(chunk)
+            # TODO: Implement matching project glossary for current chunk
+            matched_entries = self._match_main_glossary_entries_for_chunk(
+                chunk=chunk, matcher=term_matcher
+            )
             chunk_glossary_entries = self._combine_glossaries_for_chunk(
                 chunk_glossary_entries=matched_entries,
                 project_glossary_entries=self.project_glossary_entries,
@@ -177,6 +293,7 @@ class Translator:
                 self._print_prompts(system_prompt, user_prompt)
                 return None
 
+            # TODO: Verify that the overall prompt is within reasonable limits
             translated_chunk = self.llm.get_reply(
                 system_prompt=system_prompt,
                 user_prompt=user_prompt,
