@@ -3,18 +3,22 @@ import re
 import pymorphy3
 import spacy
 from iso639 import Lang
+from tqdm import tqdm
 
+from src.config import logger
 from src.glossary.models import GlossaryEntry, Term
 
 
 class Lemmatizer:
     def __init__(self) -> None:
+        logger.warning(f"Lemmatizer initialized: ID {id(self)}")
         self.nlp: spacy.language.Language | None = None
         self.morph: pymorphy3.MorphAnalyzer | None = None
 
     def _lemmatize_english(self, text: str) -> list[str]:
         if self.nlp is None:
             self.nlp = spacy.load("en_core_web_sm", disable=["ner", "parser"])
+            logger.warning(f"SpaCy NLP created for EN lemmatization: ID {id(self.nlp)}")
 
         normalized = text.replace("-", " ").replace("–", " ")
 
@@ -26,6 +30,9 @@ class Lemmatizer:
     def _lemmatize_russian(self, text: str) -> list[str]:
         if self.morph is None:
             self.morph = pymorphy3.MorphAnalyzer()
+            logger.warning(
+                f"Pymorphy3 MorphAnalyzer created for RU lemmatization: ID {self.morph}"
+            )
         words = re.findall(r"[а-яёА-ЯЁa-zA-Z0-9]+", text)
 
         lemmatized: list[str] = []
@@ -61,11 +68,12 @@ class GlossaryLemmatizer:
 
     def lemmatize_entries(self, entries: list[GlossaryEntry]) -> list[GlossaryEntry]:
         updated_entries: list[GlossaryEntry] = []
-        for entry in entries:
+        for entry in tqdm(entries):
             updated_terms: list[Term] = []
             for term in entry.terms:
                 term_lemmas = self.lemmatizer.lemmatize(term.value, term.language)
-                if term_lemmas is None:
+                if not term_lemmas:
+                    logger.warning(f"Term '{term.value}' not lemmatized")
                     updated_terms.append(term)
                     continue
                 lemmatized_term = " ".join(term_lemmas)

@@ -176,14 +176,6 @@ class GlossaryXMLParser:
         return entries
 
     def parse(self) -> list[GlossaryEntry]:
-        """
-        Read a MultiTerm XML file into a list of Glossary Entries.
-
-        Raises:
-            FileNotFoundError: If the file does not exist.
-            ValueError:        If the XML structure is invalid or inconsistent.
-            RuntimeError:      For unexpected errors during parsing.
-        """
         logger.info(f"Parsing {Path(self.file_path).name}...")
         root = self._get_xml_root()
 
@@ -212,10 +204,6 @@ class GlossaryUpdater:
         )
 
     def diff_glossary(self) -> GlossaryDiff:
-        """
-        Compare old (cached, lemmatized) entries against new (parsed, unlemmatized).
-        Returns what needs to be added, updated, and deleted.
-        """
         old_by_id: dict[int, GlossaryEntry] = {e.id: e for e in self.old}
         new_by_id: dict[int, GlossaryEntry] = {e.id: e for e in self.new}
 
@@ -242,29 +230,37 @@ class GlossaryUpdater:
         # Additions + updates
         needs_lemmatization = diff.to_add + diff.to_update
         if needs_lemmatization:
-            lemmatized: list[GlossaryEntry] = (
+            logger.info(
+                f"Launching lemmatization for {len(needs_lemmatization)} entries..."
+            )
+            lemmatized_entries: list[GlossaryEntry] = (
                 self.glossary_lemmatizer.lemmatize_entries(needs_lemmatization)
             )
-            for entry in lemmatized:
+            for entry in lemmatized_entries:
                 entries_by_id[entry.id] = entry  # insert or replace
+
+            actually_lemmatized = [
+                e
+                for e in lemmatized_entries
+                if any([t.lemmatized is not None for t in e.terms])
+            ]
+            logger.info(
+                f"{len(actually_lemmatized)} entries have been lemmatized out of "
+                f"{len(needs_lemmatization)}"
+            )
+        else:
+            logger.info("Nothing to lemmatize")
 
         return list(entries_by_id.values())
 
     def update(self) -> list[GlossaryEntry]:
-        logger.info(
-            f"Comparing {len(self.old)} old (cached, lemmatized) entries "
-            f"against {len(self.new)} new (parsed, unlemmatized)"
-        )
         diff: GlossaryDiff = self.diff_glossary()
-        logger.debug(f"{len(diff.to_add)} glossary entries to be added")
-        logger.debug(f"{len(diff.to_delete)} glossary entries to be deleted")
-        logger.debug(f"{len(diff.to_update)} glossary entries to be updated")
+        logger.info(f"{len(diff.to_add)} glossary entries to be added")
+        logger.info(f"{len(diff.to_delete)} glossary entries to be deleted")
+        logger.info(f"{len(diff.to_update)} glossary entries to be updated")
 
         updated_entries = self.apply_glossary_diff(diff)
-        logger.info(
-            f"All {len(updated_entries)} entries have been successfully updated"
-        )
-        return self.apply_glossary_diff(diff)
+        return updated_entries
 
 
 class ProjectGlossaryParser:
@@ -281,6 +277,7 @@ class ProjectGlossaryParser:
         self.lemmatizer = lemmatizer if lemmatizer else Lemmatizer()
 
     def parse(self) -> list[GlossaryEntry]:
+        logger.info(f"Parsing the project-specific glossary from {self.file}...")
         project_glossary: list[GlossaryEntry] = []
         try:
             with open(self.file, "r", encoding="utf-8") as f:
@@ -309,15 +306,34 @@ class ProjectGlossaryParser:
                     project_glossary.append(entry)
 
         except FileNotFoundError:
-            # TODO: Add proper warning logging
-            pass
-        except Exception:
-            # TODO: Add proper warning logging
-            pass
+            logger.warning(
+                f"Project glossary file not found: {self.file}. "
+                "Translation will continue, but there will be no project glossary."
+            )
+            return []
 
-        return GlossaryLemmatizer(lemmatizer=self.lemmatizer).lemmatize_entries(
-            entries=project_glossary
+        except Exception as e:
+            logger.warning(
+                f"Failed to parse the project glossary from {self.file}: "
+                f"{e}. Translation will continue, but there will be no project glossary"
+            )
+
+        logger.info(
+            f"Lemmatizing {len(project_glossary)} entries of the project glossary..."
         )
+        lemmatized_entries = GlossaryLemmatizer(
+            lemmatizer=self.lemmatizer
+        ).lemmatize_entries(entries=project_glossary)
+        actually_lemmatized = [
+            e
+            for e in lemmatized_entries
+            if any([t.lemmatized is not None for t in e.terms])
+        ]
+        logger.info(
+            f"{len(actually_lemmatized)} entries have been lemmatized out of "
+            f"{len(project_glossary)}"
+        )
+        return lemmatized_entries
 
 
 class MainGlossaryParser:
@@ -328,36 +344,15 @@ class MainGlossaryParser:
         self.lemmatizer = lemmatizer if lemmatizer else Lemmatizer()
 
     def parse(self) -> list[GlossaryEntry]:
-        # TODO: Update docstring
-        """
-        Process all XML files in a directory, parse them with GlossaryXMLParser,
-        and return a combined list of GlossaryEntry objects.
-
-        Args:
-            dir_path: Path to the directory containing XML files.
-
-        Returns:
-            List of GlossaryEntry objects from all successfully parsed files.
-
-        Raises:
-            ParserError, if:
-                - the directory does not exist
-                - the directory is not actually a directory
-                - the directory is empty
-                - there are no .xml files in the directory
-                - parsing all xml files failed
-
-
-        Behavior:
-            - Checks that dir_path exists and is a directory.
-            - Checks that the directory is not empty.
-            - Finds all files with .xml extension (case-sensitive) in the directory.
-            - For each XML file, creates a GlossaryXMLParser and calls .parse().
-            - If .parse() raises any exception, logs a warning and skips the file.
-            - Collects the list of GlossaryEntry objects from each file.
-            - Returns the concatenated list.
-        """
+        logger.info("Parsing the for the main glossary...")
         xml_files = self._get_xml_files_in_dir()
+        if not xml_files:
+            logger.warning(
+                f"No XML files have been found in {self.dir_path}. "
+                "Translation will continue, but there will be no main glossary."
+            )
+            return []
+
         logger.info(
             f"The following glossary XML files found in {self.dir_path}:\n"
             f"{'\n'.join([xmlf.name for xmlf in xml_files])}\n"
@@ -374,34 +369,53 @@ class MainGlossaryParser:
 
         failed_count = 0
         for xml_file in xml_files:
-            logger.info(f"Processing {xml_file.name}...")
             glossary_file = GlossaryFile(xml_file)
+            logger.info(f"Processing {xml_file.name}. Looking for cache...")
             cached_entries: CachedEntries = self._get_cached_entries(glossary_file)
 
             if cached_entries.are_up_to_date:
+                logger.info(
+                    f"Cache for {xml_file.name} is up to date: "
+                    f"{len(cached_entries.entries)} valid entries"
+                )
                 all_entries.extend(cached_entries.entries)
                 continue
 
+            logger.info(
+                f"Cache for {xml_file.name} is missing or outdated. "
+                "Parsing the XML file..."
+            )
             try:
                 parsed_entries = self._parse_xml_file(xml_file)
+                logger.info(
+                    f"{len(parsed_entries)} entries parsed from {xml_file.name}"
+                )
             except Exception as e:
                 failed_count += 1
                 logger.warning(f"Error parsing {xml_file}: {e}")
                 continue
 
+            logger.info(
+                f"Updating the entries: comparing {len(cached_entries.entries)} "
+                f"old (cached, lemmatized) entries against {len(parsed_entries)} "
+                "new (parsed, unlemmatized) entries..."
+            )
             updated_entries = self._get_updated_entries(
                 old=cached_entries.entries, new=parsed_entries
             )
+            logger.info(f"Entries for {xml_file.name} updated.")
 
             all_entries.extend(updated_entries)
 
-            self._update_cache(glossary_file, updated_entries)
+            cache_file = self._update_cache(glossary_file, updated_entries)
+            logger.info(f"Pickle cache has been updated and saved to {cache_file}")
 
         if not all_entries:
             if failed_count == len(xml_files):
                 raise ParserError("All XML files failed to parse")
             raise ParserError("No glossary entries found across all XML files")
 
+        logger.info(f"There are {len(all_entries)} entries in the main glossary.")
         return all_entries
 
     def _get_xml_files_in_dir(self) -> list[Path]:
@@ -447,5 +461,7 @@ class MainGlossaryParser:
 
     def _update_cache(
         self, glossary_file: GlossaryFile, entries: list[GlossaryEntry]
-    ) -> None:
-        GlossaryCache(glossary_file).write_cache(entries)
+    ) -> Path:
+        gc = GlossaryCache(glossary_file)
+        gc.write_cache(entries)
+        return gc.cache_file

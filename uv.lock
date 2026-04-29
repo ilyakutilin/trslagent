@@ -1123,6 +1123,7 @@ dependencies = [
     { name = "pydantic-settings" },
     { name = "pymorphy3" },
     { name = "spacy" },
+    { name = "tqdm" },
 ]
 
 [package.metadata]
@@ -1135,6 +1136,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.1.0" },
     { name = "pymorphy3", specifier = ">=2.0.6" },
     { name = "spacy", specifier = ">=3.8.14" },
+    { name = "tqdm", specifier = ">=4.67.3" },
 ]
 
 [[package]]

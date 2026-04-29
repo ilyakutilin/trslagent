@@ -13,4 +13,5 @@ dependencies = [
     "pydantic-settings>=2.1.0",
     "pymorphy3>=2.0.6",
     "spacy>=3.8.14",
+    "tqdm>=4.67.3",
 ]
