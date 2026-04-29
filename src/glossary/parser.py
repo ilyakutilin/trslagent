@@ -24,11 +24,11 @@ class ParserError(Exception):
 
 
 class GlossaryXMLParser:
-    def __init__(self, file_path: str | Path) -> None:
+    def __init__(self, file_path: Path) -> None:
         self.file_path = file_path
 
     def _get_xml_root(self) -> ElementTree.Element:
-        fp = Path(self.file_path)
+        fp = self.file_path
 
         logger.info(f"Loading glossary terms from XML: {fp}")
 
@@ -113,7 +113,7 @@ class GlossaryXMLParser:
     def _get_glossary_entries(
         self, xml_root: ElementTree.Element
     ) -> list[GlossaryEntry]:
-        fp = Path(self.file_path)
+        fp = self.file_path
 
         concept_groups = xml_root.findall("conceptGrp")
         if not concept_groups:
@@ -124,7 +124,6 @@ class GlossaryXMLParser:
             return []
 
         entries: list[GlossaryEntry] = []
-        self._entry_ids = set()
 
         for cg_idx, cg in enumerate(concept_groups):
             try:
@@ -176,7 +175,7 @@ class GlossaryXMLParser:
         return entries
 
     def parse(self) -> list[GlossaryEntry]:
-        logger.info(f"Parsing {Path(self.file_path).name}...")
+        logger.info(f"Parsing {self.file_path.name}...")
         root = self._get_xml_root()
 
         glossary_entries = self._get_glossary_entries(root)
@@ -193,8 +192,8 @@ class GlossaryXMLParser:
 class GlossaryUpdater:
     def __init__(
         self,
-        old: list[GlossaryEntry],
         new: list[GlossaryEntry],
+        old: list[GlossaryEntry] = [],
         glossary_lemmatizer: GlossaryLemmatizer | None = None,
     ) -> None:
         self.old = old
@@ -203,7 +202,7 @@ class GlossaryUpdater:
             glossary_lemmatizer if glossary_lemmatizer else GlossaryLemmatizer()
         )
 
-    def diff_glossary(self) -> GlossaryDiff:
+    def _diff_glossary(self) -> GlossaryDiff:
         old_by_id: dict[int, GlossaryEntry] = {e.id: e for e in self.old}
         new_by_id: dict[int, GlossaryEntry] = {e.id: e for e in self.new}
 
@@ -220,7 +219,23 @@ class GlossaryUpdater:
 
         return GlossaryDiff(to_add=to_add, to_update=to_update, to_delete=to_delete)
 
-    def apply_glossary_diff(self, diff: GlossaryDiff) -> list[GlossaryEntry]:
+    def _lemmatize_entries(self, entries: list[GlossaryEntry]) -> list[GlossaryEntry]:
+        logger.info(f"Launching lemmatization for {len(entries)} entries...")
+        lemmatized_entries: list[GlossaryEntry] = (
+            self.glossary_lemmatizer.lemmatize_entries(entries)
+        )
+        actually_lemmatized = [
+            e
+            for e in lemmatized_entries
+            if any([t.lemmatized is not None for t in e.terms])
+        ]
+        logger.info(
+            f"{len(actually_lemmatized)} entries have been lemmatized out of "
+            f"{len(entries)}"
+        )
+        return lemmatized_entries
+
+    def _apply_glossary_diff(self, diff: GlossaryDiff) -> list[GlossaryEntry]:
         entries_by_id: dict[int, GlossaryEntry] = {e.id: e for e in self.old}
 
         # Deletions
@@ -230,36 +245,27 @@ class GlossaryUpdater:
         # Additions + updates
         needs_lemmatization = diff.to_add + diff.to_update
         if needs_lemmatization:
-            logger.info(
-                f"Launching lemmatization for {len(needs_lemmatization)} entries..."
-            )
-            lemmatized_entries: list[GlossaryEntry] = (
-                self.glossary_lemmatizer.lemmatize_entries(needs_lemmatization)
-            )
+            lemmatized_entries = self._lemmatize_entries(needs_lemmatization)
             for entry in lemmatized_entries:
                 entries_by_id[entry.id] = entry  # insert or replace
-
-            actually_lemmatized = [
-                e
-                for e in lemmatized_entries
-                if any([t.lemmatized is not None for t in e.terms])
-            ]
-            logger.info(
-                f"{len(actually_lemmatized)} entries have been lemmatized out of "
-                f"{len(needs_lemmatization)}"
-            )
         else:
             logger.info("Nothing to lemmatize")
 
         return list(entries_by_id.values())
 
     def update(self) -> list[GlossaryEntry]:
-        diff: GlossaryDiff = self.diff_glossary()
+        if self.old == self.new:
+            logger.warning("")
+
+        if not self.old:
+            return self._lemmatize_entries(self.new)
+
+        diff: GlossaryDiff = self._diff_glossary()
         logger.info(f"{len(diff.to_add)} glossary entries to be added")
         logger.info(f"{len(diff.to_delete)} glossary entries to be deleted")
         logger.info(f"{len(diff.to_update)} glossary entries to be updated")
 
-        updated_entries = self.apply_glossary_diff(diff)
+        updated_entries = self._apply_glossary_diff(diff)
         return updated_entries
 
 
@@ -281,7 +287,8 @@ class ProjectGlossaryParser:
         project_glossary: list[GlossaryEntry] = []
         try:
             with open(self.file, "r", encoding="utf-8") as f:
-                for idx, line in enumerate(f):
+                next_id = 1
+                for line in f:
                     line = line.strip()
 
                     # Skip empty lines and comments
@@ -289,8 +296,12 @@ class ProjectGlossaryParser:
                         continue
 
                     # Parse "term = translation"
-                    parts = line.split("=", 1)
-                    if len(parts) != 2:
+                    parts = [part.strip() for part in line.split("=", 1)]
+                    if len(parts) != 2 or not all(parts):
+                        logger.warning(
+                            "Failed to parse malformed line "
+                            f"in the project glossary file: {line}"
+                        )
                         continue
 
                     # Parse separate terms accounting for synonyms
@@ -302,7 +313,8 @@ class ProjectGlossaryParser:
                             terms.append(Term(language=lg, value=syn))
 
                     # Construct the entry and add to the final list
-                    entry = GlossaryEntry(id=idx, terms=frozenset(terms))
+                    entry = GlossaryEntry(id=next_id, terms=frozenset(terms))
+                    next_id += 1
                     project_glossary.append(entry)
 
         except FileNotFoundError:
@@ -318,22 +330,10 @@ class ProjectGlossaryParser:
                 f"{e}. Translation will continue, but there will be no project glossary"
             )
 
-        logger.info(
-            f"Lemmatizing {len(project_glossary)} entries of the project glossary..."
-        )
-        lemmatized_entries = GlossaryLemmatizer(
-            lemmatizer=self.lemmatizer
-        ).lemmatize_entries(entries=project_glossary)
-        actually_lemmatized = [
-            e
-            for e in lemmatized_entries
-            if any([t.lemmatized is not None for t in e.terms])
-        ]
-        logger.info(
-            f"{len(actually_lemmatized)} entries have been lemmatized out of "
-            f"{len(project_glossary)}"
-        )
-        return lemmatized_entries
+        return GlossaryUpdater(
+            new=project_glossary,
+            glossary_lemmatizer=GlossaryLemmatizer(lemmatizer=self.lemmatizer),
+        ).update()
 
 
 class MainGlossaryParser:
@@ -344,7 +344,7 @@ class MainGlossaryParser:
         self.lemmatizer = lemmatizer if lemmatizer else Lemmatizer()
 
     def parse(self) -> list[GlossaryEntry]:
-        logger.info("Parsing the for the main glossary...")
+        logger.info("Parsing the main glossary...")
         xml_files = self._get_xml_files_in_dir()
         if not xml_files:
             logger.warning(
@@ -381,10 +381,12 @@ class MainGlossaryParser:
                 all_entries.extend(cached_entries.entries)
                 continue
 
+            cache_missing = bool(cached_entries.entries)
             logger.info(
-                f"Cache for {xml_file.name} is missing or outdated. "
-                "Parsing the XML file..."
+                f"Cache for {xml_file.name} is "
+                f"{'missing' if cache_missing else 'outdated'}. Parsing the XML file..."
             )
+
             try:
                 parsed_entries = self._parse_xml_file(xml_file)
                 logger.info(
@@ -448,12 +450,12 @@ class MainGlossaryParser:
     def _get_cached_entries(self, glossary_file: GlossaryFile) -> CachedEntries:
         return GlossaryCache(glossary_file).get_cache()
 
-    def _parse_xml_file(self, xml_file: str | Path) -> list[GlossaryEntry]:
+    def _parse_xml_file(self, xml_file: Path) -> list[GlossaryEntry]:
         parser = GlossaryXMLParser(xml_file)
         return parser.parse()
 
     def _get_updated_entries(
-        self, old: list[GlossaryEntry], new: list[GlossaryEntry]
+        self, new: list[GlossaryEntry], old: list[GlossaryEntry]
     ) -> list[GlossaryEntry]:
         glossary_lemmatizer = GlossaryLemmatizer(lemmatizer=self.lemmatizer)
         updater = GlossaryUpdater(old, new, glossary_lemmatizer)
