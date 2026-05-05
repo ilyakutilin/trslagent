@@ -2,7 +2,7 @@ from typing import Annotated, Any
 
 from iso639 import Lang
 from iso639.exceptions import InvalidLanguageValue
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, field_validator
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field, PlainSerializer
 
 
 def parse_lang(v: Any) -> Lang:
@@ -19,7 +19,11 @@ def parse_lang(v: Any) -> Lang:
     )
 
 
-LangField = Annotated[Lang, BeforeValidator(parse_lang)]
+LangField = Annotated[
+    Lang,
+    BeforeValidator(parse_lang),
+    PlainSerializer(lambda x: x.pt1, return_type=str, when_used="always"),
+]
 
 
 class BaseInput(BaseModel):
