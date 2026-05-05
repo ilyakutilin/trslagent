@@ -152,9 +152,9 @@ def cli() -> None:
 
     print_prompt_only = args.print_prompt_only
 
-    if args.settings_file:
+    if args.input_file:
         try:
-            json_str = read_str_from_file(args.settings_file)
+            json_str = read_str_from_file(args.input_file)
             cli_inp = CLIInput.model_validate_json(json_str)
         except Exception:
             print("Failed to parse CLI input file, will proceed with questions")
