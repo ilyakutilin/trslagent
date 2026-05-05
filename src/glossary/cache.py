@@ -36,7 +36,7 @@ class GlossaryCache:
             logger.info(
                 f"Cache hit — loaded {len(cached_entries.entries)} entries from pickle."
             )
-            if are_up_to_date:
+            if not are_up_to_date:
                 logger.warning("Cache is stale. Re-parsing is required.")
             else:
                 logger.info("Cache is up to date and is going to be used.")
