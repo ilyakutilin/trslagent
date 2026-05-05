@@ -409,7 +409,7 @@ class ProjectGlossaryParser:
 
     def __init__(
         self,
-        project_glossary_file_path: Path,
+        project_glossary_lines: list[str],
         source_lang: Lang,
         target_lang: Lang,
         lemmatizer: Lemmatizer | None = None,
@@ -417,69 +417,54 @@ class ProjectGlossaryParser:
         """Initialize the ProjectGlossaryParser.
 
         Args:
-            project_glossary_file_path: Path to the project glossary file.
+            project_glossary_lines: String lines read from the project glossary file.
             source_lang: Source language for the glossary.
             target_lang: Target language for the glossary.
             lemmatizer: Optional lemmatizer for glossary terms.
         """
-        self.file = project_glossary_file_path
+        self.project_glossary_lines = project_glossary_lines
         self.source_lang = source_lang
         self.target_lang = target_lang
         self.lemmatizer = lemmatizer if lemmatizer else Lemmatizer()
 
     def parse(self) -> list[GlossaryEntry]:
-        """Parse the project-specific glossary file.
+        """Parse the project-specific glossary.
 
         Returns:
             List of GlossaryEntry objects from the project glossary.
             Returns empty list if file not found or parsing fails.
         """
-        logger.info(f"Parsing the project-specific glossary from {self.file}...")
+        logger.info("Parsing the project-specific glossary...")
         project_glossary: list[GlossaryEntry] = []
-        try:
-            with open(self.file, "r", encoding="utf-8") as f:
-                next_id = 1
-                for line in f:
-                    line = line.strip()
+        next_id = 1
+        for line in self.project_glossary_lines:
+            line = line.strip()
 
-                    # Skip empty lines and comments
-                    if not line or line.startswith("#"):
-                        continue
+            # Skip empty lines and comments
+            if not line or line.startswith("#"):
+                continue
 
-                    # Parse "term = translation"
-                    parts = [part.strip() for part in line.split("=", 1)]
-                    if len(parts) != 2 or not all(parts):
-                        logger.warning(
-                            "Failed to parse malformed line "
-                            f"in the project glossary file: {line}"
-                        )
-                        continue
+            # Parse "term = translation"
+            parts = [part.strip() for part in line.split("=", 1)]
+            if len(parts) != 2 or not all(parts):
+                logger.warning(
+                    "Failed to parse malformed line "
+                    f"in the project glossary file: {line}"
+                )
+                continue
 
-                    # Parse separate terms accounting for synonyms
-                    terms: list[Term] = []
-                    for i, part in enumerate(parts):
-                        synonyms = [s.strip() for s in re.split(r"[;|]", part)]
-                        for syn in synonyms:
-                            lg = self.source_lang if i == 0 else self.target_lang
-                            terms.append(Term(language=lg, value=syn))
+            # Parse separate terms accounting for synonyms
+            terms: list[Term] = []
+            for i, part in enumerate(parts):
+                synonyms = [s.strip() for s in re.split(r"[;|]", part)]
+                for syn in synonyms:
+                    lg = self.source_lang if i == 0 else self.target_lang
+                    terms.append(Term(language=lg, value=syn))
 
-                    # Construct the entry and add to the final list
-                    entry = GlossaryEntry(id=next_id, terms=frozenset(terms))
-                    next_id += 1
-                    project_glossary.append(entry)
-
-        except FileNotFoundError:
-            logger.warning(
-                f"Project glossary file not found: {self.file}. "
-                "Translation will continue, but there will be no project glossary."
-            )
-            return []
-
-        except Exception as e:
-            logger.warning(
-                f"Failed to parse the project glossary from {self.file}: "
-                f"{e}. Translation will continue, but there will be no project glossary"
-            )
+            # Construct the entry and add to the final list
+            entry = GlossaryEntry(id=next_id, terms=frozenset(terms))
+            next_id += 1
+            project_glossary.append(entry)
 
         return GlossaryUpdater(
             new=project_glossary,
@@ -552,7 +537,7 @@ class MainGlossaryParser:
                 all_entries.extend(cached_entries.entries)
                 continue
 
-            cache_missing = bool(cached_entries.entries)
+            cache_missing = not bool(cached_entries.entries)
             logger.info(
                 f"Cache for {xml_file.name} is "
                 f"{'missing' if cache_missing else 'outdated'}. Parsing the XML file..."
@@ -670,7 +655,9 @@ class MainGlossaryParser:
             Updated list of glossary entries after applying changes.
         """
         glossary_lemmatizer = GlossaryLemmatizer(lemmatizer=self.lemmatizer)
-        updater = GlossaryUpdater(old, new, glossary_lemmatizer)
+        updater = GlossaryUpdater(
+            new=new, old=old, glossary_lemmatizer=glossary_lemmatizer
+        )
         return updater.update()
 
     def _update_cache(
