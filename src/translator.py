@@ -313,7 +313,8 @@ class Translator:
         translated_chunks: list[str] = []
         previous_translated = None
 
-        chunk_is_extract = len(chunks) > 1
+        len_chunks = len(chunks)
+        chunk_is_extract = len_chunks > 1
         term_matcher = TermMatcher(glossary_entries=self.main_glossary_entries)
         for i, chunk in enumerate(chunks):
             logger.info(f"Processing chunk {i + 1}/{len(chunks)} (length={len(chunk)})")
@@ -338,7 +339,9 @@ class Translator:
             if self.llm is None:
                 logger.warning("LLM not available, printing prompts only")
                 self._print_prompts(system_prompt, user_prompt)
-                return None
+                if i == len_chunks - 1:
+                    return None
+                continue
 
             # TODO: Verify that the overall prompt is within reasonable limits
             logger.debug(f"Sending chunk {i + 1} to LLM")
