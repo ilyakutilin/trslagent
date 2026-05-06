@@ -23,9 +23,8 @@ class Lemmatizer:
         normalized = text.replace("-", " ").replace("–", " ")
 
         doc = self.nlp(normalized)
-        return [
-            token.lemma_.lower() for token in doc if token.is_alpha or token.is_digit
-        ]
+        # TODO: 'RFGI(C)' is lemmatized as ['rfgi(c', ')']
+        return [token.lemma_.lower() for token in doc]
 
     def _lemmatize_russian(self, text: str) -> list[str]:
         if self.morph is None:

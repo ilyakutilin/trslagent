@@ -83,7 +83,7 @@ class Translator:
         self.project_glossary_entries = project_glossary_entries
 
         logger.info(
-            f"Translator initialized: {source_lang} -> {target_lang}, "
+            f"Translator initialized: {source_lang.name} -> {target_lang.name}, "
             f"specialized_in={specialized_in}, "
             f"text_length={len(text)}, "
             f"doc_type={doc_type}, doc_title={doc_title}, "
@@ -208,7 +208,7 @@ class Translator:
 
         text_description_section = ""
         if any((self.doc_type, self.doc_title)):
-            an_extract_from = " an extract from" if is_extract else ""
+            an_extract_from = "an extract from " if is_extract else ""
             doc_type = self.doc_type if self.doc_type else "document"
             titled = f" titled '{self.doc_title}'" if self.doc_title else ""
             text_description_section = (
@@ -243,7 +243,7 @@ class Translator:
         result = (
             f"You are a professional experienced translator{specialization_section}. "
             "Your task is to translate the text provided by the user "
-            f"from {self.source_lang} into {self.target_lang}."
+            f"from {self.source_lang.name} into {self.target_lang.name}."
             f"{text_description_section}"
             f"{glossary_section}"
             f"{context_section}"

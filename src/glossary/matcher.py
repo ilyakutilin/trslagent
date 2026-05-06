@@ -47,6 +47,10 @@ class TermMatcher:
         """
         Find all terms in text, resolving overlaps by keeping longest match.
         """
+        # TODO: Fix: Finds more than needed.
+        # NO (Normally Open), IS (Intrinsically Safe), CAN (Cancelled), can (обечайка),
+        # RoW (Right of Way), Release, forced, contracted in almost every text.
+
         # Tokenize and lemmatize the text
         tokens = lemmatizer.lemmatize(text, lang)
         if not tokens:
