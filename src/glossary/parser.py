@@ -173,7 +173,9 @@ class GlossaryXMLParser:
             if not term_text:
                 continue
 
-            terms.append(term_text)
+            synonyms = [s.strip() for s in re.split(r"[;|]", term_text)]
+            for syn in synonyms:
+                terms.append(syn)
 
         if len(terms) == 0:
             raise ValueError("all the terms in termGrp are empty")
