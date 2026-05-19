@@ -18,10 +18,16 @@ def parse_known_abbrs(abbr_file_path: str | Path) -> set[str]:
 
 
 class Lemmatizer:
-    def __init__(self) -> None:
-        logger.warning(f"Lemmatizer initialized: ID {id(self)}")
+    def __init__(self, known_abbrs: set[str] = set()) -> None:
         self.nlp: spacy.language.Language | None = None
         self.morph: pymorphy3.MorphAnalyzer | None = None
+        self.known_abbrs = known_abbrs
+        known_abbrs_block = (
+            f"{len(self.known_abbrs)} known abbrs loaded"
+            if self.known_abbrs
+            else "known abbrs NOT PROVIDED"
+        )
+        logger.warning(f"Lemmatizer initialized: ID {id(self)} | {known_abbrs_block}")
 
     def _lemmatize_english(self, text: str) -> list[str]:
         if self.nlp is None:
@@ -31,8 +37,13 @@ class Lemmatizer:
         normalized = text.replace("-", " ").replace("–", " ")
 
         doc = self.nlp(normalized)
-        # TODO: 'RFGI(C)' is lemmatized as ['rfgi(c', ')']
-        return [token.lemma_.lower() for token in doc]
+        lemmatized: list[str] = []
+        for token in doc:
+            if token.text in self.known_abbrs:
+                lemmatized.append(token.text)
+            else:
+                lemmatized.append(token.lemma_.lower())
+        return lemmatized
 
     def _lemmatize_russian(self, text: str) -> list[str]:
         if self.morph is None:
@@ -45,9 +56,14 @@ class Lemmatizer:
         lemmatized: list[str] = []
         lemma_cache: dict[str, str] = dict()
         for word in words:
+            if word in self.known_abbrs:
+                lemmatized.append(word)
+                continue
+
             if word in lemma_cache:
                 lemmatized.append(lemma_cache[word])
                 continue
+
             parses = self.morph.parse(word)
             lemmatized_word = parses[0].normal_form if parses else word
             lemmatized.append(lemmatized_word)
