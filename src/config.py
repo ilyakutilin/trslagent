@@ -68,7 +68,7 @@ class GlossarySettings(BaseSettings):
     """Glossary/RAG settings"""
 
     xml_dir: str = Field(
-        default="./glossary",
+        default="./files/glossary",
         description="Directory with glossary XML files exported by Multiterm",
     )
     top_k: int = Field(

@@ -20,7 +20,6 @@ temp/
 
 # Files
 files/
-glossary/
 
 # Database files
 *.db
