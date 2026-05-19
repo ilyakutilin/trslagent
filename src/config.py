@@ -74,28 +74,6 @@ class GlossarySettings(BaseSettings):
     top_k: int = Field(
         default=20, description="Number of glossary terms to retrieve per chunk"
     )
-    embedding_model: str = Field(
-        default="intfloat/multilingual-e5-large",
-        description="Sentence transformer model for embeddings",
-    )
-    hf_token: str | None = Field(
-        default=None,
-        description="Optional HuggingFace token for faster downloads and to avoid rate limiting",
-    )
-    chroma_dir: str = Field(
-        default="./chromadb", description="Directory for ChromaDB persistence"
-    )
-    collection_name: str = Field(
-        default="glossary", description="ChromaDB collection name"
-    )
-    embed_batch_size: int = Field(
-        default=100,
-        description="Number of terms to embed and upsert in each batch (smaller = more frequent saves)",
-    )
-    backup_dir: str = Field(
-        default="./chromadb/backup",
-        description="Directory for ChromaDB backups (tar.gz files)",
-    )
 
 
 class Settings(BaseSettings):
