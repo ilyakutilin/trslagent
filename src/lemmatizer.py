@@ -1,4 +1,5 @@
 import re
+from pathlib import Path
 
 import pymorphy3
 import spacy
@@ -7,6 +8,13 @@ from tqdm import tqdm
 
 from src.config import logger
 from src.glossary.models import GlossaryEntry, Term
+
+
+def parse_known_abbrs(abbr_file_path: str | Path) -> set[str]:
+    fp = Path(abbr_file_path)
+    with open(fp, "r", encoding="utf-8") as f:
+        abbrs = {line.strip() for line in f if line.strip()}
+    return abbrs
 
 
 class Lemmatizer:
