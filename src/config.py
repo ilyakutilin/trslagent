@@ -74,6 +74,9 @@ class GlossarySettings(BaseSettings):
     top_k: int = Field(
         default=20, description="Number of glossary terms to retrieve per chunk"
     )
+    known_abbrs_file_path: str | None = Field(
+        default=None, description="Path to a file with a list of known abbreviations"
+    )
 
 
 class Settings(BaseSettings):
