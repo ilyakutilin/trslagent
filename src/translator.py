@@ -248,12 +248,7 @@ class Translator:
             f"{glossary_section}"
             f"{context_section}"
         )
-        logger.debug(
-            f"Built system prompt with specialization={bool(self.specialized_in)}, "
-            f"doc_context={bool(text_description_section)}, "
-            f"glossary={bool(glossary_section)}, "
-            f"context={bool(context_section)}"
-        )
+        logger.debug(f"Built system prompt: {result}")
         return result
 
     def _build_user_prompt(self, chunk: str) -> str:
@@ -266,7 +261,7 @@ class Translator:
             Formatted user prompt string
         """
         result = f"Text for translation:\n{chunk}"
-        logger.debug(f"Built user prompt with chunk length {len(chunk)}")
+        logger.debug(f"Built user prompt: {result}")
         return result
 
     def _print_prompts(self, system_prompt: str, user_prompt: str) -> None:
@@ -357,6 +352,7 @@ class Translator:
             translated_chunks.append(translated_chunk)
             previous_translated = translated_chunk
 
+        logger.info(f"Stitching {len(translated_chunks)} chunks together")
         result = stitch_chunks(translated_chunks, chunk_overlap=settings.chunk.overlap)
         logger.info(
             f"Translation complete: {len(self.text)} -> {len(result)} characters"
