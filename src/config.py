@@ -79,6 +79,40 @@ class GlossarySettings(BaseSettings):
     )
 
 
+class GDocsSettings(BaseSettings):
+    """Google Docs interface configuration"""
+
+    credentials_path: str = Field(
+        default="credentials.json",
+        description="Path to the Google service account JSON credentials file",
+    )
+
+    document_id: str = Field(
+        default="",
+        description="ID of the Google Doc used as input (from the doc URL)",
+    )
+
+    poll_interval_seconds: int = Field(
+        default=15,
+        description="How often (seconds) to check the document for new requests",
+    )
+
+    ready_trigger: str = Field(
+        default="Ready",
+        description="Value of the Status field that triggers processing",
+    )
+
+    done_marker: str = Field(
+        default="Done",
+        description="Value written to Status after successful processing",
+    )
+
+    error_marker: str = Field(
+        default="Error",
+        description="Value written to Status if processing fails",
+    )
+
+
 class Settings(BaseSettings):
     """Main settings container"""
 
@@ -86,6 +120,7 @@ class Settings(BaseSettings):
     llm: LLMSettings = Field(default_factory=LLMSettings)
     chunk: ChunkingSettings = Field(default_factory=ChunkingSettings)
     glossary: GlossarySettings = Field(default_factory=GlossarySettings)
+    gdocs: GDocsSettings = Field(default_factory=GDocsSettings)
 
     model_config = SettingsConfigDict(
         env_file=".env",
