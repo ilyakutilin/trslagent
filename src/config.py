@@ -10,6 +10,7 @@ import sys
 from typing import Literal
 
 from loguru import logger
+from openai.types import ReasoningEffort
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -33,14 +34,24 @@ class LoggingSettings(BaseSettings):
 class LLMSettings(BaseSettings):
     """LLM/OpenRouter API settings"""
 
-    api_key: str = Field(default="", description="OpenRouter API key")
+    base_url: str = Field(
+        default="https://openrouter.ai/api/v1", description="LLM Base URL"
+    )
+    api_key: str = Field(default="", description="LLM API key")
     model: str = Field(
         default="anthropic/claude-3.5-sonnet",
         description="Model to use for translation",
     )
-    temperature: float = Field(
-        default=0.1,
+    temperature: float | None = Field(
+        default=None,
         description="Temperature for translation (lower = more consistent/literal)",
+    )
+    reasoning_effort: ReasoningEffort = Field(
+        default=None,
+        description=(
+            "Reasoning effort for the thinking models. "
+            "If not provided, reasoning is not used."
+        ),
     )
 
 
@@ -56,30 +67,15 @@ class ChunkingSettings(BaseSettings):
 class GlossarySettings(BaseSettings):
     """Glossary/RAG settings"""
 
+    xml_dir: str = Field(
+        default="./files/glossary",
+        description="Directory with glossary XML files exported by Multiterm",
+    )
     top_k: int = Field(
         default=20, description="Number of glossary terms to retrieve per chunk"
     )
-    embedding_model: str = Field(
-        default="intfloat/multilingual-e5-large",
-        description="Sentence transformer model for embeddings",
-    )
-    hf_token: str | None = Field(
-        default=None,
-        description="Optional HuggingFace token for faster downloads and to avoid rate limiting",
-    )
-    chroma_dir: str = Field(
-        default="./chromadb", description="Directory for ChromaDB persistence"
-    )
-    collection_name: str = Field(
-        default="glossary", description="ChromaDB collection name"
-    )
-    embed_batch_size: int = Field(
-        default=100,
-        description="Number of terms to embed and upsert in each batch (smaller = more frequent saves)",
-    )
-    backup_dir: str = Field(
-        default="./chromadb/backup",
-        description="Directory for ChromaDB backups (tar.gz files)",
+    known_abbrs_file_path: str | None = Field(
+        default=None, description="Path to a file with a list of known abbreviations"
     )
 
 

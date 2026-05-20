@@ -1,0 +1,13 @@
+{
+  "input_file_path": "files/source.md",
+  "source_lang": "English",
+  "target_lang": "Russian",
+  "output_file_path": "files/result.md",
+  "model": "anthropic/claude-3.5-sonnet",
+  "specialized_in": "technical translation, specifically electrical installations and electrical activities",
+  "doc_type": "procedure",
+  "doc_title": "Procedure For Electrical Continuity Checks",
+  "use_main_glossary": true,
+  "project_glossary_file_path": null,
+  "print_prompt_only": false
+}

@@ -5,12 +5,13 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "chromadb>=1.5.7",
+    "iso639-lang>=2.6.3",
     "langchain-text-splitters>=1.1.1",
     "loguru>=0.7.0",
     "openai>=2.31.0",
-    "openpyxl>=3.1.0",
+    "pyahocorasick>=2.3.0",
     "pydantic-settings>=2.1.0",
-    "sentence-transformers>=5.4.0",
-    "torch>=2.11.0",
+    "pymorphy3>=2.0.6",
+    "spacy>=3.8.14",
+    "tqdm>=4.67.3",
 ]

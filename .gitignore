@@ -18,6 +18,9 @@ venv.bak/
 tmp/
 temp/
 
+# Files
+files/
+
 # Database files
 *.db
 *.sqlite
