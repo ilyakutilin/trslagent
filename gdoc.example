@@ -1,0 +1,28 @@
+=== Translation Request ===
+
+
+Status: Draft
+
+
+--- Required ---
+Source Language: en
+Target Language: ru
+Text:
+<<<
+Your text to translate goes here,
+can span multiple lines.
+>>>
+
+
+--- Optional ---
+Model:
+Specialized In:
+Document Type:
+Document Title:
+Use Main Glossary: true
+Print Prompt Only: false
+
+
+--- Glossary ---
+term1 = translation1
+term2 = translation2
