@@ -192,6 +192,14 @@ A lighter alternative is `intfloat/multilingual-e5-small` (~120MB vs ~2GB) — g
 
 ---
 
+## Translate using Google Docs
+
+1. **Create a Google Cloud project**
+2. Enable the **Google Docs API**
+3. **Create a Service Account**
+4. Download the JSON key and put it in the project folder, set permissions
+5. **Share your Google Doc** with the service account email (give it **Editor** access so it can write the Status back)
+
 ## Tips
 
 - **Lower temperature** (`0.1`) in the config gives more consistent, literal output — appropriate for technical/legal documents.
