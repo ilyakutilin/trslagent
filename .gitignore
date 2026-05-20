@@ -20,6 +20,7 @@ temp/
 
 # Files
 files/
+credentials/
 
 # Database files
 *.db
