@@ -56,7 +56,7 @@ def truncate_at_sentence_boundary(text: str, window: int = 400) -> str:
     tail = text[-window:]
 
     # Sentence boundaries: period, exclamation mark, question mark, or double newline
-    boundary_markers = [(". ", "! ", "? "), ("\n\n", "\n\n"), "\n"]
+    boundary_markers = [". ", "! ", "? ", "\n\n", "\n"]
 
     # Find the last occurrence of any boundary marker
     last_boundary_idx = -1
