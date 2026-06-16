@@ -97,7 +97,7 @@ class DocParser:
                 kv[key] = value
 
         # ── required fields ───────────────────────────────────────────────────────
-        for required in ("source_language", "target_language", "status"):
+        for required in ("source_language", "target_language"):
             if not kv.get(required):
                 raise ValueError(f"Required field '{required}' is missing or empty.")
 
@@ -114,7 +114,7 @@ class DocParser:
             return val if val else None
 
         return dict(
-            status=kv["status"],
+            status=_optional(kv.get("status", "")),
             text=translation_text,
             source_lang=kv["source_language"],
             target_lang=kv["target_language"],
@@ -131,10 +131,10 @@ class DocParser:
             ),
         )
 
-    def parse(self) -> InputData:
+    def parse(self) -> tuple[InputData, str | None]:
         parsed = self._parse_doc_text()
-        parsed.pop("status")  # not part of InputData
-        return InputData(**parsed)
+        status = parsed.pop("status")  # not part of InputData
+        return InputData.model_validate(parsed), status
 
 
 if __name__ == "__main__":
