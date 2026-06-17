@@ -1,0 +1,32 @@
+[input_data]
+source_lang = "en"
+target_lang = "ru"
+# specialized_in = "technical and contractual translation"
+# doc_type = "letter"
+# doc_title = "Construction Constraints"
+source_file_path = "files/source.txt"
+# target_file_path = "files/target.txt"
+# auto_glossary = true
+# glossary_file_path = "files/glossary.txt"
+
+[output_data]
+# result_file_path = "files/result.md"
+# raw_result_file_path = "files/raw_result.json"
+# timestamped_result_filenames = true
+# print_prompt_only = false
+
+[llm]
+# base_url = "https://openrouter.ai/api/v1"
+# model = "qwen/qwen3.7-max"
+# temperature = 0.1
+# reasoning_effort = "high"  # none, minimal, low, medium, high, xhigh
+
+[chunk]
+# size = 6000
+
+[glossary]
+# xml_dir_path = "files/glossary"
+# known_abbrs_file_path = "files/abbrs"
+
+[log]
+# level = "INFO"  # "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"
