@@ -136,7 +136,7 @@ class GlossaryXMLParser:
             raise ValueError("<language> tag is missing")
 
         lang_code = lang_el.get("lang", "").strip().lower()
-        lang_name = lang_el.get("type", "").strip().lower()
+        lang_name = lang_el.get("type", "").strip()
         try:
             return Lang(lang_code or lang_name)
         except InvalidLanguageValue as e:

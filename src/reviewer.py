@@ -66,8 +66,6 @@ class Reviewer:
             )
 
         has_user_glossary = bool(user_glossary_str)
-        has_any_glossary = bool(user_glossary_str or auto_glossary_str)
-
         dictionary_part = ""
         if user_glossary_str:
             dictionary_part += (
