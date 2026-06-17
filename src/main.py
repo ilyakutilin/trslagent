@@ -4,6 +4,7 @@ from src.glossary.models import GlossaryEntry
 from src.glossary.parser import MainGlossaryParser, ProjectGlossaryParser
 from src.lemmatizer import Lemmatizer
 from src.llm import LLM
+from src.reviewer import Reviewer
 from src.splitter import split_text, stitch_chunks
 from src.translator import Translator
 
@@ -86,7 +87,50 @@ def main(cfg: Settings) -> str | None:
         )
 
     if cfg.input_data.target_text:
-        raise NotImplementedError("Review functionality is not yet implemented")
+        reviewer = Reviewer(
+            source_lang=cfg.input_data.source_lang,
+            target_lang=cfg.input_data.target_lang,
+            specialized_in=cfg.input_data.specialized_in,
+            doc_type=cfg.input_data.doc_type,
+            doc_title=cfg.input_data.doc_title,
+            llm=llm,
+        )
+
+        source_lang = cfg.input_data.source_lang
+        target_lang = cfg.input_data.target_lang
+
+        review_glossary_entries: list[GlossaryEntry]
+        if main_glossary_entries:
+            term_matcher = TermMatcher(glossary_entries=main_glossary_entries)
+            matched = term_matcher.match(
+                text=cfg.input_data.source_text,
+                lang=source_lang,
+                lemmatizer=lemmatizer,
+            )
+            review_glossary_entries = _deduplicate_entries(
+                matched, project_glossary_entries, source_lang
+            )
+        else:
+            review_glossary_entries = project_glossary_entries.copy()
+
+        glossary_str = _stringify_glossary(
+            review_glossary_entries, source_lang, target_lang
+        )
+
+        result = reviewer.review_text(
+            source_text=cfg.input_data.source_text,
+            target_text=cfg.input_data.target_text,
+            glossary_str=glossary_str,
+        )
+
+        logger.info(
+            f"Review complete: "
+            f"source={len(cfg.input_data.source_text)} chars, "
+            f"target={len(cfg.input_data.target_text)} chars, "
+            f"result={len(result) if result else 0} chars"
+        )
+
+        return result
 
     translator = Translator(
         source_lang=cfg.input_data.source_lang,
