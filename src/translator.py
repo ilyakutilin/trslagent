@@ -3,23 +3,19 @@
 This module provides the core translation functionality that handles:
 - Chunking large documents for efficient LLM processing
 - Glossary matching and term consistency enforcement
-- Context-aware prompt construction
-- Translation continuity between document segments
 - Glossary priority handling (project glossary overrides main glossary)
 """
 
 from iso639 import Lang
 
-from src.config import get_settings, logger
+from src.config import logger
 from src.glossary.matcher import TermMatcher
 from src.glossary.models import GlossaryEntry
 from src.lemmatizer import Lemmatizer
 from src.llm import LLM
-from src.splitter import split_text, stitch_chunks, truncate_at_sentence_boundary
+from src.splitter import split_text, stitch_chunks
 
 # ── Configuration ────────────────────────────────────────────────────────────
-
-settings = get_settings()
 
 
 class Translator:
@@ -54,6 +50,7 @@ class Translator:
         lemmatizer: Lemmatizer,
         main_glossary_entries: list[GlossaryEntry],
         project_glossary_entries: list[GlossaryEntry],
+        chunk_size: int = 6000,
     ) -> None:
         """Initialize Translator instance with configuration and dependencies.
 
@@ -81,6 +78,7 @@ class Translator:
         self.lemmatizer = lemmatizer
         self.main_glossary_entries = main_glossary_entries
         self.project_glossary_entries = project_glossary_entries
+        self.chunk_size = chunk_size
 
         logger.info(
             f"Translator initialized: {source_lang.name} -> {target_lang.name}, "
@@ -184,19 +182,16 @@ class Translator:
     def _build_system_prompt(
         self,
         is_extract: bool,
-        previous_translated: str | None,
         chunk_glossary: str | None,
     ) -> str:
         """Construct system prompt for LLM translation request.
 
         Builds a context-rich prompt including translator persona, document context,
-        glossary instructions, and previous translation segment for continuity.
+        and glossary instructions.
 
         Args:
             is_extract: True if chunk is part of a larger document,
                 False for full document
-            previous_translated: Translated text from previous chunk for continuity
-                context
             chunk_glossary: Stringified glossary entries relevant for this chunk
 
         Returns:
@@ -223,14 +218,6 @@ class Translator:
                 f"<dictionary start>\n{chunk_glossary}\n<dictionary end>"
             )
 
-        context_section = ""
-        if previous_translated:
-            tail = truncate_at_sentence_boundary(previous_translated, window=400)
-            context_section = (
-                "\nTranslation of the PREVIOUS SEGMENT (for your reference and for "
-                f"context and style continuity — do NOT retranslate this):\n{tail}"
-            )
-
         # TODO: Implement Analyze New Terms
         # analyze_new_terms = (
         #     "After the translation analyze the extract for the terms that"
@@ -246,7 +233,6 @@ class Translator:
             f"from {self.source_lang.name} into {self.target_lang.name}."
             f"{text_description_section}"
             f"{glossary_section}"
-            f"{context_section}"
         )
         logger.debug(f"Built system prompt: {result}")
         return result
@@ -284,9 +270,8 @@ class Translator:
     def translate_document(self) -> str | None:
         """Execute full document translation workflow.
 
-        Splits document into chunks, processes each chunk with glossary matching and
-        context-aware translation, then stitches translated chunks back together.
-        Maintains translation continuity between adjacent chunks.
+        Splits document into chunks, processes each chunk with glossary matching,
+        then stitches translated chunks back together.
 
         Returns:
             Fully translated document string if LLM is available, None if only
@@ -296,17 +281,12 @@ class Translator:
 
         chunks: list[str] = split_text(
             text=self.text,
-            chunk_size=settings.chunk.size,
-            chunk_overlap=settings.chunk.overlap,
+            chunk_size=self.chunk_size,
         )
 
-        logger.info(
-            f"Split text into {len(chunks)} chunks (size={settings.chunk.size}, "
-            f"overlap={settings.chunk.overlap})"
-        )
+        logger.info(f"Split text into {len(chunks)} chunks (size={self.chunk_size}")
 
         translated_chunks: list[str] = []
-        previous_translated = None
 
         len_chunks = len(chunks)
         chunk_is_extract = len_chunks > 1
@@ -326,7 +306,6 @@ class Translator:
 
             system_prompt = self._build_system_prompt(
                 is_extract=chunk_is_extract,
-                previous_translated=previous_translated,
                 chunk_glossary=chunk_glossary_str,
             )
             user_prompt = self._build_user_prompt(chunk)
@@ -350,10 +329,9 @@ class Translator:
             )
 
             translated_chunks.append(translated_chunk)
-            previous_translated = translated_chunk
 
         logger.info(f"Stitching {len(translated_chunks)} chunks together")
-        result = stitch_chunks(translated_chunks, chunk_overlap=settings.chunk.overlap)
+        result = stitch_chunks(translated_chunks)
         logger.info(
             f"Translation complete: {len(self.text)} -> {len(result)} characters"
         )
