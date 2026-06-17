@@ -1137,6 +1137,7 @@ name = "trslagent"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [
+    { name = "httpx" },
     { name = "iso639-lang" },
     { name = "langchain-text-splitters" },
     { name = "loguru" },
@@ -1155,6 +1156,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "httpx", specifier = ">=0.28.0" },
     { name = "iso639-lang", specifier = ">=2.6.3" },
     { name = "langchain-text-splitters", specifier = ">=1.1.1" },
     { name = "loguru", specifier = ">=0.7.0" },

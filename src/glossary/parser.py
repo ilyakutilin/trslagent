@@ -1,7 +1,7 @@
 """Parser module for glossary files.
 
 This module provides classes and methods for parsing glossary files in various formats
-(XML and project-specific text files), updating glossary entries, and managing
+(XML and user-supplied text files), updating glossary entries, and managing
 glossary caches. It supports lemmatization of glossary terms and handles diffing
 between old and new glossary versions.
 """
@@ -399,45 +399,45 @@ class GlossaryUpdater:
         return updated_entries
 
 
-class ProjectGlossaryParser:
-    """Parser for project-specific glossary text files.
+class UserGlossaryParser:
+    """Parser for user-supplied glossary text files.
 
-    This class parses project glossary files that use a simple text format
+    This class parses user glossary files that use a simple text format
     with "term = translation" lines, supporting synonyms separated by
     semicolons or pipes.
     """
 
     def __init__(
         self,
-        project_glossary_lines: list[str],
+        user_glossary_lines: list[str],
         source_lang: Lang,
         target_lang: Lang,
         lemmatizer: Lemmatizer | None = None,
     ) -> None:
-        """Initialize the ProjectGlossaryParser.
+        """Initialize the UserGlossaryParser.
 
         Args:
-            project_glossary_lines: String lines read from the project glossary file.
+            user_glossary_lines: String lines read from the user glossary file.
             source_lang: Source language for the glossary.
             target_lang: Target language for the glossary.
             lemmatizer: Optional lemmatizer for glossary terms.
         """
-        self.project_glossary_lines = project_glossary_lines
+        self.user_glossary_lines = user_glossary_lines
         self.source_lang = source_lang
         self.target_lang = target_lang
         self.lemmatizer = lemmatizer if lemmatizer else Lemmatizer()
 
     def parse(self) -> list[GlossaryEntry]:
-        """Parse the project-specific glossary.
+        """Parse the user-supplied glossary.
 
         Returns:
-            List of GlossaryEntry objects from the project glossary.
+            List of GlossaryEntry objects from the user glossary.
             Returns empty list if file not found or parsing fails.
         """
-        logger.info("Parsing the project-specific glossary...")
-        project_glossary: list[GlossaryEntry] = []
+        logger.info("Parsing the user-supplied glossary...")
+        user_glossary: list[GlossaryEntry] = []
         next_id = 1
-        for line in self.project_glossary_lines:
+        for line in self.user_glossary_lines:
             line = line.strip()
 
             # Skip empty lines and comments
@@ -449,7 +449,7 @@ class ProjectGlossaryParser:
             if len(parts) != 2 or not all(parts):
                 logger.warning(
                     "Failed to parse malformed line "
-                    f"in the project glossary file: {line}"
+                    f"in the user glossary file: {line}"
                 )
                 continue
 
@@ -464,16 +464,16 @@ class ProjectGlossaryParser:
             # Construct the entry and add to the final list
             entry = GlossaryEntry(id=next_id, terms=frozenset(terms))
             next_id += 1
-            project_glossary.append(entry)
+            user_glossary.append(entry)
 
         return GlossaryUpdater(
-            new=project_glossary,
+            new=user_glossary,
             glossary_lemmatizer=GlossaryLemmatizer(lemmatizer=self.lemmatizer),
         ).update()
 
 
-class MainGlossaryParser:
-    """Parser for the main glossary directory containing XML files.
+class AutoGlossaryParser:
+    """Parser for the auto glossary directory containing XML files.
 
     This class handles parsing of multiple XML glossary files from a directory,
     managing cache files, and updating glossary entries with lemmatization.
@@ -482,7 +482,7 @@ class MainGlossaryParser:
     def __init__(
         self, dir_path: str | Path, lemmatizer: Lemmatizer | None = None
     ) -> None:
-        """Initialize the MainGlossaryParser.
+        """Initialize the AutoGlossaryParser.
 
         Args:
             dir_path: Path to the directory containing glossary XML files.
@@ -500,12 +500,12 @@ class MainGlossaryParser:
         Raises:
             ParserError: If all XML files fail to parse or no entries are found.
         """
-        logger.info("Parsing the main glossary...")
+        logger.info("Parsing the auto glossary...")
         xml_files = self._get_xml_files_in_dir()
         if not xml_files:
             logger.warning(
                 f"No XML files have been found in {self.dir_path}. "
-                "Translation will continue, but there will be no main glossary."
+                "Translation will continue, but there will be no auto glossary."
             )
             return []
 
@@ -573,7 +573,7 @@ class MainGlossaryParser:
                 raise ParserError("All XML files failed to parse")
             raise ParserError("No glossary entries found across all XML files")
 
-        logger.info(f"There are {len(all_entries)} entries in the main glossary.")
+        logger.info(f"There are {len(all_entries)} entries in the auto glossary.")
         return all_entries
 
     def _get_xml_files_in_dir(self) -> list[Path]:

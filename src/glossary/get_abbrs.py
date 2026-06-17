@@ -5,7 +5,7 @@ from tqdm import tqdm
 
 from src.config import get_settings
 from src.glossary.models import GlossaryEntry, Term
-from src.glossary.parser import MainGlossaryParser
+from src.glossary.parser import AutoGlossaryParser
 from src.lemmatizer import Lemmatizer
 
 
@@ -40,11 +40,11 @@ def main() -> None:
 
     settings = get_settings(toml_path=toml_path)
     lemmatizer = Lemmatizer()
-    main_glossary_entries = MainGlossaryParser(
+    auto_glossary_entries = AutoGlossaryParser(
         dir_path=settings.glossary.xml_dir_path,
         lemmatizer=lemmatizer,
     ).parse()
-    terms = _flatten_terms(main_glossary_entries)
+    terms = _flatten_terms(auto_glossary_entries)
     capitalized_words: set[str] = set()
     for term in tqdm(terms):
         if is_abbreviation(term.value):

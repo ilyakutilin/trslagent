@@ -21,8 +21,8 @@
 - Known abbreviations (loaded from `files/abbrs`) are skipped during lemmatization — kept as-is in matched text.
 
 ## Glossary
-- **Main glossary**: Multiterm/Multitran XML export with `<mtf>` root → `<conceptGrp>` → `<languageGrp>` → `<termGrp>`. Non-standard format, handled by `src/glossary/parser.py`.
-- **Project glossary**: Plain text file with `term = translation` lines. Used per-document, overrides main glossary where terms conflict.
+- **Auto glossary**: Multiterm/Multitran XML export with `<mtf>` root → `<conceptGrp>` → `<languageGrp>` → `<termGrp>`. Non-standard format, handled by `src/glossary/parser.py`.
+- **User glossary**: Plain text file with `term = translation` lines. Used per-document, overrides auto glossary where terms conflict.
 - **Caching**: Parsed XML entries are cached as `.pickle` files alongside the XML source files. Cache validity is based on SHA-256 hash of the XML file. Stale/missing caches trigger automatic re-parse and re-lemmatization. Non-matching orphan pickle files are cleaned up automatically.
 - **Abbreviation extraction**: Run `src/glossary/get_abbrs.py` (standalone) to scan the glossary for abbreviations and write `files/abbrs`. Used by the lemmatizer to preserve abbreviations.
 

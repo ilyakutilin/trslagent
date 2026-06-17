@@ -52,7 +52,8 @@ class Translator:
     def _build_system_prompt(
         self,
         is_extract: bool,
-        chunk_glossary: str,
+        user_glossary_str: str,
+        auto_glossary_str: str,
     ) -> str:
         specialization_section = (
             f" specialized in {self.specialized_in}" if self.specialized_in else ""
@@ -68,11 +69,22 @@ class Translator:
             )
 
         glossary_section = ""
-        if chunk_glossary:
-            glossary_section = (
-                "\nUse the following dictionary when translating. If a term is in the "
-                "dictionary, its translation shall be taken from the dictionary.\n"
-                f"<dictionary start>\n{chunk_glossary}\n<dictionary end>"
+        if user_glossary_str:
+            glossary_section += (
+                "\nThe following terms were provided by the user. If a term "
+                "appears in the source text, its translation must be taken "
+                "from this dictionary strictly.\n"
+                f"<user dictionary start>\n{user_glossary_str}\n"
+                "<user dictionary end>"
+            )
+        if auto_glossary_str:
+            glossary_section += (
+                "\nThe following terms were automatically matched from a "
+                "reference glossary. Note that some terms may not be "
+                "contextually relevant. Consider and use them only if "
+                "applicable; otherwise ignore.\n"
+                f"<auto dictionary start>\n{auto_glossary_str}\n"
+                "<auto dictionary end>"
             )
 
         result = (
@@ -100,13 +112,15 @@ class Translator:
         print("=" * 35 + "\n")
 
     async def translate_chunk_async(
-        self, chunk: str, glossary_str: str, is_extract: bool
+        self, chunk: str, user_glossary_str: str, auto_glossary_str: str,
+        is_extract: bool
     ) -> tuple[str | None, str | None]:
         logger.info(f"Translating chunk (length={len(chunk)})")
 
         system_prompt = self._build_system_prompt(
             is_extract=is_extract,
-            chunk_glossary=glossary_str,
+            user_glossary_str=user_glossary_str,
+            auto_glossary_str=auto_glossary_str,
         )
         user_prompt = self._build_user_prompt(chunk)
 

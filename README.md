@@ -1,19 +1,19 @@
 # trslagent — AI Translation Agent
 
-Glossary-aware LLM document translation and review. Takes an `.xml` glossary (Multiterm export) or a plain-text project glossary, matches terms against source text with lemmatization and Aho-Corasick, then sends chunked text to an LLM (OpenRouter) for translation — or reviews an existing translation for critical mistakes.
+Glossary-aware LLM document translation and review. Takes an `.xml` glossary (Multiterm export) or a plain-text user glossary, matches terms against source text with lemmatization and Aho-Corasick, then sends chunked text to an LLM (OpenRouter) for translation — or reviews an existing translation for critical mistakes.
 
 ## Architecture overview
 
 ```
 Config TOML
     │
-    ├── Glossary  ──► parse .xml (Multiterm) + .txt (project)  ──► lemmatize
+    ├── Glossary  ──► parse .xml (Multiterm) + .txt (user)  ──► lemmatize
     │                                                              │
     ├── Source text ──► chunk (RecursiveCharacterTextSplitter) ─┐  │
     │                                                           │  │
     │   For each chunk:                                         │  │
     │     match glossary terms (Aho-Corasick on lemmas)  ◄──────┘  │
-    │     deduplicate (project overrides main)                     │
+    │     deduplicate (user overrides auto)                     │
     │     build LLM prompt (system + user + dictionary)            │
     │     call OpenRouter LLM                                      │
     │                                                              │
@@ -34,7 +34,7 @@ src/
 ├── lemmatizer.py             # EN (spaCy) / RU (pymorphy3) lemmatizer
 ├── utils.py                  # file I/O helpers
 ├── glossary/
-│   ├── parser.py             # XML & project-glossary parsers + cache logic
+│   ├── parser.py             # XML & user-glossary parsers + cache logic
 │   ├── cache.py              # .pickle cache (SHA-256 validated)
 │   ├── matcher.py            # Aho-Corasick term matching
 │   ├── models.py             # Term, GlossaryEntry, GlossaryFile
@@ -42,9 +42,9 @@ src/
 files/
 ├── config.toml               # working config
 ├── source.txt                # sample source
-├── projgloss.txt             # sample project glossary
+├── projgloss.txt             # sample user glossary
 ├── abbrs                     # known abbreviations (auto-extracted)
-└── glossary/                 # main glossary XMLs + .pickle caches
+└── glossary/                 # auto glossary XMLs + .pickle caches
 config.example.toml           # config reference
 .env.example                  # env vars reference
 ```
@@ -97,8 +97,8 @@ All sections and their keys:
 |               | `doc_title`                    | —                               | Document title for prompt context                   |
 |               | `source_file_path`             | `"files/source.txt"`            | Input text file                                     |
 |               | `target_file_path`             | —                               | Set to enable **review mode**                       |
-|               | `auto_glossary`                | `false`                         | Match main glossary against source                  |
-|               | `glossary_file_path`           | —                               | Path to project glossary `.txt`                     |
+|               | `auto_glossary`                | `false`                         | Match auto glossary against source                  |
+|               | `user_glossary_file_path`      | —                               | Path to user glossary `.txt`                     |
 | `output_data` | `result_file_path`             | `"files/result.md"`             | Output file                                         |
 |               | `raw_result_file_path`         | `"files/raw_result.json"`       | (unused)                                            |
 |               | `print_prompt_only`            | `false`                         | Dry-run: print prompts, skip LLM                    |
@@ -143,10 +143,10 @@ python src/cli.py files/config.toml
 
 What happens:
 
-1. Main glossary XMLs are parsed (cached as `.pickle`, re-parsed only if XML changed)
-2. Project glossary (if configured) is parsed and lemmatized
+1. Auto glossary XMLs are parsed (cached as `.pickle`, re-parsed only if XML changed)
+2. User glossary (if configured) is parsed and lemmatized
 3. Source text is split into chunks
-4. For each chunk, glossary terms are matched via lemmatized Aho-Corasick, project glossary overrides main where they conflict, matched terms are injected into the LLM system prompt
+4. For each chunk, glossary terms are matched via lemmatized Aho-Corasick, user glossary overrides auto where they conflict, matched terms are injected into the LLM system prompt
 5. Chunks are translated **concurrently** (up to `max_concurrent` at a time, staggered by `delay_seconds`) and stitched back together
 6. Result is written to `result_file_path`
 
@@ -192,11 +192,11 @@ Runs the full glossary matching pipeline and writes the matched term=translation
 python src/glossary/get_abbrs.py files/config.toml
 ```
 
-Scans the main glossary for abbreviation-like terms (all-uppercase or mixed-case, ≤8 chars) and writes them to `files/abbrs`. These are then excluded from lemmatization during matching.
+Scans the auto glossary for abbreviation-like terms (all-uppercase or mixed-case, ≤8 chars) and writes them to `files/abbrs`. These are then excluded from lemmatization during matching.
 
 ## Glossary
 
-### Main glossary (Multiterm XML)
+### Auto glossary (Multiterm XML)
 
 Export from Multiterm with default settings. Place all `.xml` files in one directory (default: `files/glossary`).
 
@@ -222,7 +222,7 @@ Expected XML structure (`<mtf>` root):
 - Synonyms are split by `;` or `|`
 - Cache is stored as `.pickle` files alongside the XMLs, validated by SHA-256 hash
 
-### Project glossary (override)
+### User glossary (override)
 
 Plain text file, one entry per line:
 
@@ -236,8 +236,8 @@ commissioning = пусконаладка | ПНР
 - `#` lines are comments, blank lines are ignored
 - Format: `source_term = target_term`
 - Synonyms separated by `;` or `|`
-- **Project glossary always overrides the main glossary** on a per-term basis
-- Terms in the project glossary that don't appear in the main glossary are still included
+- **User glossary always overrides the auto glossary** on a per-term basis
+- Terms in the user glossary that don't appear in the auto glossary are still included
 
 ## Lemmatization
 
@@ -256,10 +256,18 @@ System prompt structure for translation:
 You are a professional experienced translator specialized in <domain>.
 Translate from <source> into <target>.
 The text for translation is an extract from a <doc_type> titled '<doc_title>'.
-Use the following dictionary...
-<dictionary start>
+The following terms were provided by the user. If a term appears in the source text,
+its translation must be taken from this dictionary strictly.
+<user dictionary start>
 SOURCE_TERM = TARGET_TERM
-<dictionary end>
+<user dictionary end>
+
+The following terms were automatically matched from a reference glossary.
+Note that some terms may not be contextually relevant.
+Consider and use them only if applicable; otherwise ignore.
+<auto dictionary start>
+SOURCE_TERM = TARGET_TERM
+<auto dictionary end>
 ```
 
 ## Development notes

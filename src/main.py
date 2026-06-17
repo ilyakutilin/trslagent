@@ -3,7 +3,7 @@ import asyncio
 from src.config import Settings, logger
 from src.glossary.matcher import TermMatcher
 from src.glossary.models import GlossaryEntry
-from src.glossary.parser import MainGlossaryParser, ProjectGlossaryParser
+from src.glossary.parser import AutoGlossaryParser, UserGlossaryParser
 from src.lemmatizer import Lemmatizer
 from src.llm import LLM, fetch_cost
 from src.reviewer import Reviewer
@@ -31,46 +31,46 @@ def _parse_glossaries(
     cfg: Settings,
     lemmatizer: Lemmatizer,
 ) -> tuple[list[GlossaryEntry], list[GlossaryEntry]]:
-    main_entries: list[GlossaryEntry] = []
+    auto_entries: list[GlossaryEntry] = []
     if cfg.input_data.auto_glossary:
-        main_entries = MainGlossaryParser(
+        auto_entries = AutoGlossaryParser(
             dir_path=cfg.glossary.xml_dir_path,
             lemmatizer=lemmatizer,
         ).parse()
 
-    project_entries: list[GlossaryEntry] = []
-    if cfg.input_data.glossary_lines:
-        project_entries = ProjectGlossaryParser(
-            project_glossary_lines=cfg.input_data.glossary_lines,
+    user_entries: list[GlossaryEntry] = []
+    if cfg.input_data.user_glossary_lines:
+        user_entries = UserGlossaryParser(
+            user_glossary_lines=cfg.input_data.user_glossary_lines,
             source_lang=cfg.input_data.source_lang,
             target_lang=cfg.input_data.target_lang,
             lemmatizer=lemmatizer,
         ).parse()
 
-    return main_entries, project_entries
+    return auto_entries, user_entries
 
 
 def _deduplicate_entries(
     matched: list[GlossaryEntry],
-    project_entries: list[GlossaryEntry],
+    user_entries: list[GlossaryEntry],
     source_lang: Lang,
-) -> list[GlossaryEntry]:
-    lemmatized_project_terms: list[str] = []
-    for ge in project_entries:
+) -> tuple[list[GlossaryEntry], list[GlossaryEntry]]:
+    lemmatized_user_terms: list[str] = []
+    for ge in user_entries:
         for term in [t for t in ge.terms if t.language == source_lang]:
             if term.lemmatized:
-                lemmatized_project_terms.append(term.lemmatized)
+                lemmatized_user_terms.append(term.lemmatized)
 
-    all_entries = project_entries.copy()
+    auto_only: list[GlossaryEntry] = []
     for ge in matched:
         to_include = True
         for term in [t for t in ge.terms if t.language == source_lang]:
-            if term.lemmatized in lemmatized_project_terms:
+            if term.lemmatized in lemmatized_user_terms:
                 to_include = False
         if to_include:
-            all_entries.append(ge)
+            auto_only.append(ge)
 
-    return all_entries
+    return user_entries.copy(), auto_only
 
 
 async def _resolve_and_log_cost(
@@ -118,7 +118,7 @@ async def _resolve_and_log_cost(
 async def main(cfg: Settings) -> str | None:
     lemmatizer = Lemmatizer()
 
-    main_glossary_entries, project_glossary_entries = _parse_glossaries(cfg, lemmatizer)
+    auto_glossary_entries, user_glossary_entries = _parse_glossaries(cfg, lemmatizer)
 
     llm = None
     if not cfg.output_data.print_prompt_only:
@@ -143,28 +143,32 @@ async def main(cfg: Settings) -> str | None:
         source_lang = cfg.input_data.source_lang
         target_lang = cfg.input_data.target_lang
 
-        review_glossary_entries: list[GlossaryEntry]
-        if main_glossary_entries:
-            term_matcher = TermMatcher(glossary_entries=main_glossary_entries)
+        if auto_glossary_entries:
+            term_matcher = TermMatcher(glossary_entries=auto_glossary_entries)
             matched = term_matcher.match(
                 text=cfg.input_data.source_text or "",
                 lang=source_lang,
                 lemmatizer=lemmatizer,
             )
-            review_glossary_entries = _deduplicate_entries(
-                matched, project_glossary_entries, source_lang
+            review_user_entries, review_auto_entries = _deduplicate_entries(
+                matched, user_glossary_entries, source_lang
             )
         else:
-            review_glossary_entries = project_glossary_entries.copy()
+            review_user_entries = user_glossary_entries.copy()
+            review_auto_entries = []
 
-        glossary_str = _stringify_glossary(
-            review_glossary_entries, source_lang, target_lang
+        user_glossary_str = _stringify_glossary(
+            review_user_entries, source_lang, target_lang
+        )
+        auto_glossary_str = _stringify_glossary(
+            review_auto_entries, source_lang, target_lang
         )
 
         result, completion_id = await reviewer.review_text_async(
             source_text=cfg.input_data.source_text or "",
             target_text=cfg.input_data.target_text or "",
-            glossary_str=glossary_str,
+            user_glossary_str=user_glossary_str,
+            auto_glossary_str=auto_glossary_str,
         )
 
         completion_ids: list[str] = []
@@ -200,8 +204,8 @@ async def main(cfg: Settings) -> str | None:
     is_extract = len(chunks) > 1
 
     term_matcher = None
-    if main_glossary_entries:
-        term_matcher = TermMatcher(glossary_entries=main_glossary_entries)
+    if auto_glossary_entries:
+        term_matcher = TermMatcher(glossary_entries=auto_glossary_entries)
 
     source_lang = cfg.input_data.source_lang
     target_lang = cfg.input_data.target_lang
@@ -211,10 +215,10 @@ async def main(cfg: Settings) -> str | None:
     def _get_chunk_glossary(
         chunk: str,
         term_matcher: TermMatcher | None,
-        project_entries: list[GlossaryEntry],
+        user_entries: list[GlossaryEntry],
         source_lang: Lang,
         lemmatizer: Lemmatizer,
-    ) -> list[GlossaryEntry]:
+    ) -> tuple[list[GlossaryEntry], list[GlossaryEntry]]:
         if term_matcher is not None:
             matched = term_matcher.match(
                 text=chunk,
@@ -222,24 +226,28 @@ async def main(cfg: Settings) -> str | None:
                 lemmatizer=lemmatizer,
             )
             return _deduplicate_entries(
-                matched, project_entries, source_lang
+                matched, user_entries, source_lang
             )
-        return project_entries.copy()
+        return user_entries.copy(), []
 
     if llm is None:
         for i, chunk in enumerate(chunks):
             logger.info(
                 f"Processing chunk {i + 1}/{len(chunks)} (length={len(chunk)})"
             )
-            chunk_glossary_entries = _get_chunk_glossary(
-                chunk, term_matcher, project_glossary_entries, source_lang, lemmatizer
+            chunk_user_entries, chunk_auto_entries = _get_chunk_glossary(
+                chunk, term_matcher, user_glossary_entries, source_lang, lemmatizer
             )
-            glossary_str = _stringify_glossary(
-                chunk_glossary_entries, source_lang, target_lang
+            user_glossary_str = _stringify_glossary(
+                chunk_user_entries, source_lang, target_lang
+            )
+            auto_glossary_str = _stringify_glossary(
+                chunk_auto_entries, source_lang, target_lang
             )
             await translator.translate_chunk_async(
                 chunk=chunk,
-                glossary_str=glossary_str,
+                user_glossary_str=user_glossary_str,
+                auto_glossary_str=auto_glossary_str,
                 is_extract=is_extract,
             )
         return None
@@ -257,16 +265,20 @@ async def main(cfg: Settings) -> str | None:
                 f"Processing chunk {i + 1}/{len(chunks)} (length={len(chunk)})"
             )
 
-            chunk_glossary_entries = _get_chunk_glossary(
-                chunk, term_matcher, project_glossary_entries, source_lang, lemmatizer
+            chunk_user_entries, chunk_auto_entries = _get_chunk_glossary(
+                chunk, term_matcher, user_glossary_entries, source_lang, lemmatizer
             )
-            glossary_str = _stringify_glossary(
-                chunk_glossary_entries, source_lang, target_lang
+            user_glossary_str = _stringify_glossary(
+                chunk_user_entries, source_lang, target_lang
+            )
+            auto_glossary_str = _stringify_glossary(
+                chunk_auto_entries, source_lang, target_lang
             )
 
             return await translator.translate_chunk_async(
                 chunk=chunk,
-                glossary_str=glossary_str,
+                user_glossary_str=user_glossary_str,
+                auto_glossary_str=auto_glossary_str,
                 is_extract=is_extract,
             )
 
@@ -305,17 +317,17 @@ async def main(cfg: Settings) -> str | None:
 def export_glossary_matches(cfg: Settings) -> str:
     lemmatizer = Lemmatizer()
 
-    main_glossary_entries, project_glossary_entries = _parse_glossaries(cfg, lemmatizer)
+    auto_glossary_entries, user_glossary_entries = _parse_glossaries(cfg, lemmatizer)
 
     source_lang = cfg.input_data.source_lang
     target_lang = cfg.input_data.target_lang
     text = cfg.input_data.source_text or ""
 
-    if not main_glossary_entries:
-        logger.warning("No main glossary entries available for matching")
+    if not auto_glossary_entries:
+        logger.warning("No auto glossary entries available for matching")
         return ""
 
-    term_matcher = TermMatcher(glossary_entries=main_glossary_entries)
+    term_matcher = TermMatcher(glossary_entries=auto_glossary_entries)
 
     matched = term_matcher.match(
         text=text,
@@ -323,14 +335,15 @@ def export_glossary_matches(cfg: Settings) -> str:
         lemmatizer=lemmatizer,
     )
 
-    all_entries = _deduplicate_entries(
-        matched, project_glossary_entries, source_lang
+    user_entries, auto_entries = _deduplicate_entries(
+        matched, user_glossary_entries, source_lang
     )
 
     logger.info(
-        f"Glossary match: {len(matched)} main entries matched, "
-        f"{len(project_glossary_entries)} project entries, "
-        f"{len(all_entries)} total after dedup"
+        f"Glossary match: {len(matched)} auto entries matched, "
+        f"{len(user_glossary_entries)} user entries, "
+        f"{len(user_entries) + len(auto_entries)} total after dedup"
     )
 
+    all_entries = user_entries + auto_entries
     return _stringify_glossary(all_entries, source_lang, target_lang)

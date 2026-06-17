@@ -50,7 +50,9 @@ class Reviewer:
             f"llm_available={llm is not None}"
         )
 
-    def _build_system_prompt(self, glossary_str: str) -> str:
+    def _build_system_prompt(
+        self, user_glossary_str: str, auto_glossary_str: str
+    ) -> str:
         specialization_section = (
             f" specialized in {self.specialized_in}" if self.specialized_in else ""
         )
@@ -63,13 +65,27 @@ class Reviewer:
                 f"\nThe text is a {doc_type}{titled}."
             )
 
+        has_any_glossary = bool(user_glossary_str or auto_glossary_str)
+
         dictionary_part = ""
-        if glossary_str:
-            dictionary_part = (
-                "The translator should have used a specific dictionary when "
-                "translating. Make sure that if a term is in the dictionary, "
-                "its translation corresponds to the dictionary.\n"
-                f"<dictionary start>\n{glossary_str}\n<dictionary end>\n"
+        if user_glossary_str:
+            dictionary_part += (
+                "The translator was instructed to strictly follow these "
+                "user-supplied dictionary terms. Make sure that if a term "
+                "is in this dictionary, its translation corresponds "
+                "to the dictionary.\n"
+                f"<user dictionary start>\n{user_glossary_str}\n"
+                "<user dictionary end>\n"
+            )
+        if auto_glossary_str:
+            dictionary_part += (
+                "The translator was provided with the following "
+                "automatically matched terms from a reference glossary. "
+                "Note that some of these terms may not be contextually "
+                "relevant and the translator was not required to use them. "
+                "Consider them as supplementary reference only.\n"
+                f"<auto dictionary start>\n{auto_glossary_str}\n"
+                "<auto dictionary end>\n"
             )
 
         result = (
@@ -85,7 +101,7 @@ class Reviewer:
             "missing / untranslated parts, wrong translation (distortion of "
             "sense), unnecessary additions, spelling mistakes, wrong numbers "
             "and codes"
-            f"{', deviation from the set dictionary' if glossary_str else ''} etc.\n"
+            f"{', deviation from the set dictionary' if has_any_glossary else ''} etc.\n"
             f"{dictionary_part}"
             "As a result provide a list of mistakes and potential "
             "improvements to the translation."
@@ -112,7 +128,8 @@ class Reviewer:
         print("=" * 35 + "\n")
 
     async def review_text_async(
-        self, source_text: str, target_text: str, glossary_str: str
+        self, source_text: str, target_text: str,
+        user_glossary_str: str, auto_glossary_str: str,
     ) -> tuple[str | None, str | None]:
         logger.info(
             f"Reviewing text "
@@ -120,7 +137,10 @@ class Reviewer:
             f"target_length={len(target_text)})"
         )
 
-        system_prompt = self._build_system_prompt(glossary_str=glossary_str)
+        system_prompt = self._build_system_prompt(
+            user_glossary_str=user_glossary_str,
+            auto_glossary_str=auto_glossary_str,
+        )
         user_prompt = self._build_user_prompt(source_text, target_text)
 
         if self.llm is None:

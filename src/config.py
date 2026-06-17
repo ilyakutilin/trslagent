@@ -176,15 +176,15 @@ class InputData(BaseModel):
     auto_glossary: bool = Field(
         default=False,
         description=(
-            "Whether to automatically extract glossary terms from the main glossary"
+            "Whether to automatically extract glossary terms from the auto glossary"
         ),
     )
-    glossary_file_path: str | None = Field(
+    user_glossary_file_path: str | None = Field(
         default=None,
-        description=("Path to a file containing the glossary specific to this task"),
+        description=("Path to a file containing the user-supplied glossary"),
     )
-    glossary_lines: list[str] | None = Field(
-        default=None, description="String lines read from the glossary file"
+    user_glossary_lines: list[str] | None = Field(
+        default=None, description="String lines read from the user glossary file"
     )
 
     @model_validator(mode="after")
@@ -204,11 +204,11 @@ class InputData(BaseModel):
             except (IOError, OSError, UnicodeDecodeError) as e:
                 raise ValueError(f"Failed to read {self.target_file_path}: {e}")
 
-        if self.glossary_lines is None and self.glossary_file_path is not None:
+        if self.user_glossary_lines is None and self.user_glossary_file_path is not None:
             try:
-                self.glossary_lines = read_lines_from_file(fp=self.glossary_file_path)
+                self.user_glossary_lines = read_lines_from_file(fp=self.user_glossary_file_path)
             except (IOError, OSError, UnicodeDecodeError) as e:
-                raise ValueError(f"Failed to read {self.glossary_file_path}: {e}")
+                raise ValueError(f"Failed to read {self.user_glossary_file_path}: {e}")
 
         return self
 

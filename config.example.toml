@@ -7,7 +7,7 @@ target_lang = "ru"
 source_file_path = "files/source.txt"
 # target_file_path = "files/target.txt"
 # auto_glossary = true
-# glossary_file_path = "files/glossary.txt"
+# user_glossary_file_path = "files/glossary.txt"
 
 [output_data]
 # result_file_path = "files/result.md"
