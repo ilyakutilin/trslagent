@@ -1,22 +1,40 @@
-from src.config import Settings
+from src.config import Settings, logger
+from src.glossary.matcher import TermMatcher
+from src.glossary.models import GlossaryEntry
 from src.glossary.parser import MainGlossaryParser, ProjectGlossaryParser
 from src.lemmatizer import Lemmatizer
 from src.llm import LLM
+from src.splitter import split_text, stitch_chunks
 from src.translator import Translator
+
+from iso639 import Lang
+
+
+def _stringify_glossary(
+    entries: list[GlossaryEntry],
+    source_lang: Lang,
+    target_lang: Lang,
+) -> str:
+    str_entries: list[str] = []
+    for entry in entries:
+        str_entry = entry.stringify(source_lang, target_lang)
+        if str_entry is not None:
+            str_entries.append(str_entry)
+
+    return "\n".join(str_entries)
 
 
 def main(cfg: Settings) -> str | None:
     lemmatizer = Lemmatizer()
 
-    # Get all glossary entries
-    main_glossary_entries = []
+    main_glossary_entries: list[GlossaryEntry] = []
     if cfg.input_data.auto_glossary:
         main_glossary_entries = MainGlossaryParser(
             dir_path=cfg.glossary.xml_dir_path,
             lemmatizer=lemmatizer,
         ).parse()
 
-    project_glossary_entries = []
+    project_glossary_entries: list[GlossaryEntry] = []
     if cfg.input_data.glossary_lines:
         project_glossary_entries = ProjectGlossaryParser(
             project_glossary_lines=cfg.input_data.glossary_lines,
@@ -36,20 +54,86 @@ def main(cfg: Settings) -> str | None:
         )
 
     if cfg.input_data.target_text:
-        # TODO: Implement review functionality
         raise NotImplementedError("Review functionality is not yet implemented")
-    else:
-        translator = Translator(
-            source_lang=cfg.input_data.source_lang,
-            target_lang=cfg.input_data.target_lang,
-            specialized_in=cfg.input_data.specialized_in,
-            text=cfg.input_data.source_text or "",
-            doc_type=cfg.input_data.doc_type,
-            doc_title=cfg.input_data.doc_title,
-            llm=llm,
-            lemmatizer=lemmatizer,
-            main_glossary_entries=main_glossary_entries,
-            project_glossary_entries=project_glossary_entries,
+
+    translator = Translator(
+        source_lang=cfg.input_data.source_lang,
+        target_lang=cfg.input_data.target_lang,
+        specialized_in=cfg.input_data.specialized_in,
+        doc_type=cfg.input_data.doc_type,
+        doc_title=cfg.input_data.doc_title,
+        llm=llm,
+    )
+
+    text = cfg.input_data.source_text or ""
+    chunks = split_text(text=text, chunk_size=cfg.chunk.size)
+    logger.info(f"Split text into {len(chunks)} chunks (size={cfg.chunk.size})")
+
+    is_extract = len(chunks) > 1
+
+    term_matcher = None
+    if main_glossary_entries:
+        term_matcher = TermMatcher(glossary_entries=main_glossary_entries)
+
+    source_lang = cfg.input_data.source_lang
+    target_lang = cfg.input_data.target_lang
+
+    lemmatized_project_terms: list[str] = []
+    for ge in project_glossary_entries:
+        for term in [t for t in ge.terms if t.language == source_lang]:
+            if term.lemmatized:
+                lemmatized_project_terms.append(term.lemmatized)
+
+    translated_chunks: list[str] = []
+
+    for i, chunk in enumerate(chunks):
+        logger.info(
+            f"Processing chunk {i + 1}/{len(chunks)} (length={len(chunk)})"
         )
 
-        return translator.translate_document()
+        chunk_glossary_entries: list[GlossaryEntry]
+        if term_matcher is not None:
+            matched = term_matcher.match(
+                text=chunk,
+                lang=source_lang,
+                lemmatizer=lemmatizer,
+            )
+            # TODO: Implement matching project glossary for current chunk
+            chunk_glossary_entries = project_glossary_entries.copy()
+            for ge in matched:
+                to_include = True
+                for term in [t for t in ge.terms if t.language == source_lang]:
+                    if term.lemmatized in lemmatized_project_terms:
+                        to_include = False
+                if to_include:
+                    chunk_glossary_entries.append(ge)
+        else:
+            chunk_glossary_entries = project_glossary_entries.copy()
+
+        glossary_str = _stringify_glossary(
+            chunk_glossary_entries, source_lang, target_lang
+        )
+
+        translated = translator.translate_chunk(
+            chunk=chunk,
+            glossary_str=glossary_str,
+            is_extract=is_extract,
+        )
+
+        if translated is not None:
+            translated_chunks.append(translated)
+        elif llm is None:
+            if i == len(chunks) - 1:
+                return None
+        else:
+            logger.warning(
+                f"Chunk {i+1} translation returned None unexpectedly, skipping"
+            )
+
+    logger.info(f"Stitching {len(translated_chunks)} chunks together")
+    result = stitch_chunks(translated_chunks)
+    logger.info(
+        f"Translation complete: {len(text)} -> {len(result)} characters"
+    )
+
+    return result
