@@ -23,6 +23,8 @@ source_file_path = "files/source.txt"
 
 [chunk]
 # size = 6000
+# max_concurrent = 3
+# delay_seconds = 1.5
 
 [glossary]
 # xml_dir_path = "files/glossary"

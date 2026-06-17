@@ -109,6 +109,8 @@ All sections and their keys:
 |               | `temperature`                  | —                               | `float` or unset for model default                  |
 |               | `reasoning_effort`             | —                               | `none`, `minimal`, `low`, `medium`, `high`, `xhigh` |
 | `chunk`       | `size`                         | `6000`                          | Max chunk size in characters                        |
+|               | `max_concurrent`               | `3`                             | Max simultaneous LLM calls per task                 |
+|               | `delay_seconds`                | `1.5`                           | Seconds between launching chunk tasks               |
 | `glossary`    | `xml_dir_path`                 | `"files/glossary"`              | Dir with Multiterm `.xml` exports                   |
 |               | `known_abbrs_file_path`        | —                               | Path to abbreviations list                          |
 | `log`         | `level`                        | `"INFO"`                        | `DEBUG`/`INFO`/`WARNING`/`ERROR`/`CRITICAL`         |
@@ -122,6 +124,8 @@ LLM__MODEL=qwen/qwen3.7-max
 LLM__TEMPERATURE=0.1
 LLM__REASONING_EFFORT=high
 CHUNK__SIZE=6000
+CHUNK__MAX_CONCURRENT=3
+CHUNK__DELAY_SECONDS=1.5
 GLOSSARY__XML_DIR_PATH=files/glossary
 GLOSSARY__KNOWN_ABBRS_FILE_PATH=files/abbrs
 LOG__LEVEL=INFO
@@ -143,7 +147,7 @@ What happens:
 2. Project glossary (if configured) is parsed and lemmatized
 3. Source text is split into chunks
 4. For each chunk, glossary terms are matched via lemmatized Aho-Corasick, project glossary overrides main where they conflict, matched terms are injected into the LLM system prompt
-5. Chunks are translated and stitched back together
+5. Chunks are translated **concurrently** (up to `max_concurrent` at a time, staggered by `delay_seconds`) and stitched back together
 6. Result is written to `result_file_path`
 
 ### Review

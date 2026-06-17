@@ -111,20 +111,9 @@ class Reviewer:
         print(user_prompt)
         print("=" * 35 + "\n")
 
-    def review_text(
+    async def review_text_async(
         self, source_text: str, target_text: str, glossary_str: str
     ) -> str | None:
-        """Review an existing full-text translation.
-
-        Args:
-            source_text: Original source text
-            target_text: Existing translation to review
-            glossary_str: Stringified glossary entries for dictionary validation
-
-        Returns:
-            Review text (list of mistakes) if LLM is available,
-            None if only prompts were printed
-        """
         logger.info(
             f"Reviewing text "
             f"(source_length={len(source_text)}, "
@@ -140,7 +129,7 @@ class Reviewer:
             return None
 
         logger.debug("Sending to LLM for review")
-        result = self.llm.get_reply(
+        result = await self.llm.get_reply_async(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
         )

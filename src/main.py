@@ -1,3 +1,5 @@
+import asyncio
+
 from src.config import Settings, logger
 from src.glossary.matcher import TermMatcher
 from src.glossary.models import GlossaryEntry
@@ -71,7 +73,7 @@ def _deduplicate_entries(
     return all_entries
 
 
-def main(cfg: Settings) -> str | None:
+async def main(cfg: Settings) -> str | None:
     lemmatizer = Lemmatizer()
 
     main_glossary_entries, project_glossary_entries = _parse_glossaries(cfg, lemmatizer)
@@ -117,7 +119,7 @@ def main(cfg: Settings) -> str | None:
             review_glossary_entries, source_lang, target_lang
         )
 
-        result = reviewer.review_text(
+        result = await reviewer.review_text_async(
             source_text=cfg.input_data.source_text or "",
             target_text=cfg.input_data.target_text or "",
             glossary_str=glossary_str,
@@ -156,39 +158,76 @@ def main(cfg: Settings) -> str | None:
 
     translated_chunks: list[str] = []
 
-    for i, chunk in enumerate(chunks):
-        logger.info(
-            f"Processing chunk {i + 1}/{len(chunks)} (length={len(chunk)})"
-        )
-
-        chunk_glossary_entries: list[GlossaryEntry]
+    def _get_chunk_glossary(
+        chunk: str,
+        term_matcher: TermMatcher | None,
+        project_entries: list[GlossaryEntry],
+        source_lang: Lang,
+        lemmatizer: Lemmatizer,
+    ) -> list[GlossaryEntry]:
         if term_matcher is not None:
             matched = term_matcher.match(
                 text=chunk,
                 lang=source_lang,
                 lemmatizer=lemmatizer,
             )
-            chunk_glossary_entries = _deduplicate_entries(
-                matched, project_glossary_entries, source_lang
+            return _deduplicate_entries(
+                matched, project_entries, source_lang
             )
-        else:
-            chunk_glossary_entries = project_glossary_entries.copy()
+        return project_entries.copy()
 
-        glossary_str = _stringify_glossary(
-            chunk_glossary_entries, source_lang, target_lang
-        )
+    if llm is None:
+        for i, chunk in enumerate(chunks):
+            logger.info(
+                f"Processing chunk {i + 1}/{len(chunks)} (length={len(chunk)})"
+            )
+            chunk_glossary_entries = _get_chunk_glossary(
+                chunk, term_matcher, project_glossary_entries, source_lang, lemmatizer
+            )
+            glossary_str = _stringify_glossary(
+                chunk_glossary_entries, source_lang, target_lang
+            )
+            await translator.translate_chunk_async(
+                chunk=chunk,
+                glossary_str=glossary_str,
+                is_extract=is_extract,
+            )
+        return None
 
-        translated = translator.translate_chunk(
-            chunk=chunk,
-            glossary_str=glossary_str,
-            is_extract=is_extract,
-        )
+    semaphore = asyncio.Semaphore(cfg.chunk.max_concurrent)
 
-        if translated is not None:
-            translated_chunks.append(translated)
-        elif llm is None:
-            if i == len(chunks) - 1:
-                return None
+    async def _process_single_chunk(i: int, chunk: str) -> str | None:
+        if i > 0 and cfg.chunk.max_concurrent > 1:
+            await asyncio.sleep(cfg.chunk.delay_seconds)
+
+        async with semaphore:
+            logger.info(
+                f"Processing chunk {i + 1}/{len(chunks)} (length={len(chunk)})"
+            )
+
+            chunk_glossary_entries = _get_chunk_glossary(
+                chunk, term_matcher, project_glossary_entries, source_lang, lemmatizer
+            )
+            glossary_str = _stringify_glossary(
+                chunk_glossary_entries, source_lang, target_lang
+            )
+
+            return await translator.translate_chunk_async(
+                chunk=chunk,
+                glossary_str=glossary_str,
+                is_extract=is_extract,
+            )
+
+    tasks = [_process_single_chunk(i, chunk) for i, chunk in enumerate(chunks)]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
+    for i, result in enumerate(results):
+        if isinstance(result, BaseException):
+            logger.warning(
+                f"Chunk {i+1} failed with error: {result}, skipping"
+            )
+        elif result is not None:
+            translated_chunks.append(result)
         else:
             logger.warning(
                 f"Chunk {i+1} translation returned None unexpectedly, skipping"

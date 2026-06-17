@@ -1,3 +1,4 @@
+import asyncio
 import sys
 from pathlib import Path
 
@@ -44,7 +45,7 @@ def cli() -> None:
             f.write(result)
         return
 
-    translation = main(cfg=settings)
+    translation = asyncio.run(main(cfg=settings))
     if translation:
         with open(settings.output_data.result_file_path, "w", encoding="utf-8") as f:
             f.write(translation)

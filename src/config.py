@@ -62,6 +62,12 @@ class ChunkSettings(BaseSettings):
     """Text chunking settings"""
 
     size: int = Field(default=6000, description="Maximum chunk size in characters")
+    max_concurrent: int = Field(
+        default=3, description="Max simultaneous LLM API calls"
+    )
+    delay_seconds: float = Field(
+        default=1.5, description="Seconds between launching chunk tasks"
+    )
 
 
 class GlossarySettings(BaseSettings):

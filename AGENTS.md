@@ -32,7 +32,15 @@
 - `--print-prompt-only` / `print_prompt_only: true` skips LLM calls and prints the constructed prompts to stdout.
 
 ## Review Mode
-- **Not implemented**. `src/main.py:39` raises `NotImplementedError` when `target_text` is set.
+- Enabled by setting `target_file_path` (or `target_text`) in the config.
+- Sends the full source + target text to the LLM for proofreading (no chunking for now).
+- Returns a list of critical mistakes: missing translations, distortions, spelling, numbers, dictionary deviations.
+
+## Translation (Async Chunks)
+- Chunks are processed **concurrently** via `asyncio.gather()`.
+- Concurrency is controlled by `ChunkSettings.max_concurrent` (default 3) and `delay_seconds` (default 1.5) to avoid 429 rate limits.
+- One chunk failure does not kill the others (`return_exceptions=True`).
+- Per-request retries with exponential backoff are preserved for 429/timeout/connection errors.
 
 ## Testing / Linting / CI
 - No tests, no linting config, no typecheck config, no CI workflows. None exist in this repo.

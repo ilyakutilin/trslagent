@@ -99,19 +99,9 @@ class Translator:
         print(user_prompt)
         print("=" * 35 + "\n")
 
-    def translate_chunk(
+    async def translate_chunk_async(
         self, chunk: str, glossary_str: str, is_extract: bool
     ) -> str | None:
-        """Translate a single text chunk with optional glossary context.
-
-        Args:
-            chunk: Text chunk to translate
-            glossary_str: Stringified glossary entries relevant for this chunk
-            is_extract: True if chunk is part of a larger document
-
-        Returns:
-            Translated text if LLM is available, None if only prompts were printed
-        """
         logger.info(f"Translating chunk (length={len(chunk)})")
 
         system_prompt = self._build_system_prompt(
@@ -126,7 +116,7 @@ class Translator:
             return None
 
         logger.debug("Sending chunk to LLM")
-        translated_chunk = self.llm.get_reply(
+        translated_chunk = await self.llm.get_reply_async(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
         )
