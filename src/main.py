@@ -24,24 +24,56 @@ def _stringify_glossary(
     return "\n".join(str_entries)
 
 
-def main(cfg: Settings) -> str | None:
-    lemmatizer = Lemmatizer()
-
-    main_glossary_entries: list[GlossaryEntry] = []
+def _parse_glossaries(
+    cfg: Settings,
+    lemmatizer: Lemmatizer,
+) -> tuple[list[GlossaryEntry], list[GlossaryEntry]]:
+    main_entries: list[GlossaryEntry] = []
     if cfg.input_data.auto_glossary:
-        main_glossary_entries = MainGlossaryParser(
+        main_entries = MainGlossaryParser(
             dir_path=cfg.glossary.xml_dir_path,
             lemmatizer=lemmatizer,
         ).parse()
 
-    project_glossary_entries: list[GlossaryEntry] = []
+    project_entries: list[GlossaryEntry] = []
     if cfg.input_data.glossary_lines:
-        project_glossary_entries = ProjectGlossaryParser(
+        project_entries = ProjectGlossaryParser(
             project_glossary_lines=cfg.input_data.glossary_lines,
             source_lang=cfg.input_data.source_lang,
             target_lang=cfg.input_data.target_lang,
             lemmatizer=lemmatizer,
         ).parse()
+
+    return main_entries, project_entries
+
+
+def _deduplicate_entries(
+    matched: list[GlossaryEntry],
+    project_entries: list[GlossaryEntry],
+    source_lang: Lang,
+) -> list[GlossaryEntry]:
+    lemmatized_project_terms: list[str] = []
+    for ge in project_entries:
+        for term in [t for t in ge.terms if t.language == source_lang]:
+            if term.lemmatized:
+                lemmatized_project_terms.append(term.lemmatized)
+
+    all_entries = project_entries.copy()
+    for ge in matched:
+        to_include = True
+        for term in [t for t in ge.terms if t.language == source_lang]:
+            if term.lemmatized in lemmatized_project_terms:
+                to_include = False
+        if to_include:
+            all_entries.append(ge)
+
+    return all_entries
+
+
+def main(cfg: Settings) -> str | None:
+    lemmatizer = Lemmatizer()
+
+    main_glossary_entries, project_glossary_entries = _parse_glossaries(cfg, lemmatizer)
 
     llm = None
     if not cfg.output_data.print_prompt_only:
@@ -78,12 +110,6 @@ def main(cfg: Settings) -> str | None:
     source_lang = cfg.input_data.source_lang
     target_lang = cfg.input_data.target_lang
 
-    lemmatized_project_terms: list[str] = []
-    for ge in project_glossary_entries:
-        for term in [t for t in ge.terms if t.language == source_lang]:
-            if term.lemmatized:
-                lemmatized_project_terms.append(term.lemmatized)
-
     translated_chunks: list[str] = []
 
     for i, chunk in enumerate(chunks):
@@ -98,15 +124,9 @@ def main(cfg: Settings) -> str | None:
                 lang=source_lang,
                 lemmatizer=lemmatizer,
             )
-            # TODO: Implement matching project glossary for current chunk
-            chunk_glossary_entries = project_glossary_entries.copy()
-            for ge in matched:
-                to_include = True
-                for term in [t for t in ge.terms if t.language == source_lang]:
-                    if term.lemmatized in lemmatized_project_terms:
-                        to_include = False
-                if to_include:
-                    chunk_glossary_entries.append(ge)
+            chunk_glossary_entries = _deduplicate_entries(
+                matched, project_glossary_entries, source_lang
+            )
         else:
             chunk_glossary_entries = project_glossary_entries.copy()
 
@@ -137,3 +157,37 @@ def main(cfg: Settings) -> str | None:
     )
 
     return result
+
+
+def export_glossary_matches(cfg: Settings) -> str:
+    lemmatizer = Lemmatizer()
+
+    main_glossary_entries, project_glossary_entries = _parse_glossaries(cfg, lemmatizer)
+
+    source_lang = cfg.input_data.source_lang
+    target_lang = cfg.input_data.target_lang
+    text = cfg.input_data.source_text or ""
+
+    if not main_glossary_entries:
+        logger.warning("No main glossary entries available for matching")
+        return ""
+
+    term_matcher = TermMatcher(glossary_entries=main_glossary_entries)
+
+    matched = term_matcher.match(
+        text=text,
+        lang=source_lang,
+        lemmatizer=lemmatizer,
+    )
+
+    all_entries = _deduplicate_entries(
+        matched, project_glossary_entries, source_lang
+    )
+
+    logger.info(
+        f"Glossary match: {len(matched)} main entries matched, "
+        f"{len(project_glossary_entries)} project entries, "
+        f"{len(all_entries)} total after dedup"
+    )
+
+    return _stringify_glossary(all_entries, source_lang, target_lang)
