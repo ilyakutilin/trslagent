@@ -7,28 +7,31 @@ via environment variables or .env file.
 """
 
 import sys
-from typing import Literal
+import tomllib
+from pathlib import Path
+from typing import Annotated, Any, ClassVar, Literal, Self, Type
 
+from iso639 import Lang
+from iso639.exceptions import InvalidLanguageValue
 from loguru import logger
 from openai.types import ReasoningEffort
-from pydantic import Field
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    PlainSerializer,
+    SecretStr,
+    model_validator,
+)
+from pydantic.fields import FieldInfo
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
 
-
-class LoggingSettings(BaseSettings):
-    """Logging settings"""
-
-    level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
-        default="INFO", description="Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)"
-    )
-    format: str = Field(
-        default=(
-            "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> |"
-            " <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - "
-            "<level>{message}</level>"
-        ),
-        description="Log format string",
-    )
+from src.utils import read_lines_from_file, read_str_from_file
 
 
 class LLMSettings(BaseSettings):
@@ -37,7 +40,7 @@ class LLMSettings(BaseSettings):
     base_url: str = Field(
         default="https://openrouter.ai/api/v1", description="LLM Base URL"
     )
-    api_key: str = Field(default="", description="LLM API key")
+    api_key: SecretStr = Field(default=SecretStr(""), description="LLM API key")
     model: str = Field(
         default="anthropic/claude-3.5-sonnet",
         description="Model to use for translation",
@@ -55,70 +58,257 @@ class LLMSettings(BaseSettings):
     )
 
 
-class ChunkingSettings(BaseSettings):
+class ChunkSettings(BaseSettings):
     """Text chunking settings"""
 
     size: int = Field(default=6000, description="Maximum chunk size in characters")
-    overlap: int = Field(
-        default=600, description="Overlap between chunks in characters"
-    )
 
 
 class GlossarySettings(BaseSettings):
     """Glossary/RAG settings"""
 
-    xml_dir: str = Field(
-        default="./files/glossary",
+    xml_dir_path: Path = Field(
+        default=Path("files/glossary"),
         description="Directory with glossary XML files exported by Multiterm",
     )
-    top_k: int = Field(
-        default=20, description="Number of glossary terms to retrieve per chunk"
-    )
-    known_abbrs_file_path: str | None = Field(
+    known_abbrs_file_path: Path | None = Field(
         default=None, description="Path to a file with a list of known abbreviations"
     )
 
 
-class Settings(BaseSettings):
-    """Main settings container"""
+class LogSettings(BaseModel):
+    """Logging settings"""
 
-    log: LoggingSettings = Field(default_factory=LoggingSettings)
-    llm: LLMSettings = Field(default_factory=LLMSettings)
-    chunk: ChunkingSettings = Field(default_factory=ChunkingSettings)
-    glossary: GlossarySettings = Field(default_factory=GlossarySettings)
-
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        env_nested_delimiter="__",
+    level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = Field(
+        default="INFO", description="Log level (DEBUG, INFO, WARNING, ERROR, CRITICAL)"
+    )
+    format: str = Field(
+        default=(
+            "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> |"
+            " <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - "
+            "<level>{message}</level>"
+        ),
+        description="Log format string",
     )
 
 
-# Global settings instance
-_settings = Settings()
+def parse_lang(v: Any) -> Lang:
+    if isinstance(v, str):
+        try:
+            return Lang(v)
+        except InvalidLanguageValue as e:
+            raise ValueError(e)
+    if isinstance(v, Lang):
+        return v
+    raise ValueError(
+        f"Object {v} is of a wrong class {v.__class__.__name__} "
+        "while only str and Lang are supported"
+    )
 
 
-def get_settings() -> Settings:
-    """Get the global settings instance."""
-    return _settings
+LangField = Annotated[
+    Lang,
+    BeforeValidator(parse_lang),
+    PlainSerializer(lambda x: x.pt1, return_type=str, when_used="always"),
+]
 
 
-def setup_logging() -> None:
+class InputData(BaseModel):
+    source_lang: LangField = Field(default=Lang("en"), description="Source language")
+    target_lang: LangField = Field(default=Lang("en"), description="Target language")
+    specialized_in: str | None = Field(
+        default=None,
+        description="Specialization of the LLM translator. Fed into the system prompt",
+    )
+    doc_type: str | None = Field(
+        default=None,
+        description=(
+            "Document type (letter, procedure, presentation etc.). "
+            "Fed into the system prompt"
+        ),
+    )
+    doc_title: str | None = Field(
+        default=None, description="Document title. Fed into the system prompt"
+    )
+    source_file_path: Path = Field(
+        default=Path("files/source.txt"),
+        description=(
+            "Path to a file containning the source text for translation or review"
+        ),
+    )
+    target_file_path: Path | None = Field(
+        default=None,
+        description=(
+            "Path to a file containning the target text for review. "
+            "If None, the mode is 'translation'. If not None, the mode is 'review'."
+        ),
+    )
+    source_text: str | None = Field(
+        default=None, description="Source text", min_length=1
+    )
+    target_text: str | None = Field(
+        default=None, description="Target text (for review mode)", min_length=1
+    )
+    auto_glossary: bool = Field(
+        default=False,
+        description=(
+            "Whether to automatically extract glossary terms from the main glossary"
+        ),
+    )
+    glossary_file_path: str | None = Field(
+        default=None,
+        description=("Path to a file containing the glossary specific to this task"),
+    )
+    glossary_lines: list[str] | None = Field(
+        default=None, description="String lines read from the glossary file"
+    )
+
+    @model_validator(mode="after")
+    def validate_input_data(self) -> Self:
+        if self.source_lang == self.target_lang:
+            raise ValueError("Please set the source and target langs correctly")
+
+        if self.source_text is None:
+            try:
+                self.source_text = read_str_from_file(fp=self.source_file_path)
+            except (IOError, OSError, UnicodeDecodeError) as e:
+                raise ValueError(f"Failed to read {self.target_file_path}: {e}")
+
+        if self.target_text is None and self.target_file_path is not None:
+            try:
+                self.target_text = read_str_from_file(fp=self.target_file_path)
+            except (IOError, OSError, UnicodeDecodeError) as e:
+                raise ValueError(f"Failed to read {self.target_file_path}: {e}")
+
+        if self.glossary_lines is None and self.glossary_file_path is not None:
+            try:
+                self.glossary_lines = read_lines_from_file(fp=self.glossary_file_path)
+            except (IOError, OSError, UnicodeDecodeError) as e:
+                raise ValueError(f"Failed to read {self.glossary_file_path}: {e}")
+
+        return self
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+class OutputData(BaseModel):
+    result_file_path: Path = Field(
+        default=Path("files/result.md"), description="Path to a result file"
+    )
+    raw_result_file_path: Path = Field(
+        default=Path("files/raw_result.json"),
+        description="Path to a raw JSON result file",
+    )
+    timestamped_result_filenames: bool = Field(
+        default=True,
+        description="Whether a timestamp should be appended to the result file name",
+    )
+    print_prompt_only: bool = Field(
+        default=False,
+        description=(
+            "Debug flag to not execute translation and only print the prompts "
+            "that would be fed to LLM"
+        ),
+    )
+
+
+class TomlConfigSource(PydanticBaseSettingsSource):
+    """
+    Reads settings from a TOML file.
+
+    Only keys that are *actually present* in the TOML are emitted, so any
+    missing key naturally falls through to the next lower-priority source
+    (env vars, .env file, or Pydantic defaults).
+    """
+
+    def __init__(self, settings_cls: Type[BaseSettings], path: Path) -> None:
+        super().__init__(settings_cls)
+        self._data: dict[str, Any] = {}
+        if path.is_file():
+            with open(path, "rb") as fh:
+                self._data = tomllib.load(fh)
+
+    # Required by PydanticBaseSettingsSource
+
+    def get_field_value(
+        self, field: FieldInfo, field_name: str
+    ) -> tuple[Any, str, bool]:
+        val = self._data.get(field_name)
+        return val, field_name, self.field_is_complex(field)
+
+    def __call__(self) -> dict[str, Any]:
+        return {
+            name: self._data[name]
+            for name in self.settings_cls.model_fields
+            if name in self._data
+        }
+
+
+_PROJECT_ROOT = Path(__file__).parent.parent
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=_PROJECT_ROOT / ".env",
+        env_file_encoding="utf-8",
+        env_nested_delimiter="__",
+        case_sensitive=False,
+        env_ignore_empty=True,
+    )
+
+    llm: LLMSettings = Field(default_factory=LLMSettings)
+    chunk: ChunkSettings = Field(default_factory=ChunkSettings)
+    glossary: GlossarySettings = Field(default_factory=GlossarySettings)
+    log: LogSettings = Field(default_factory=LogSettings)
+    input_data: InputData = Field(default_factory=InputData)
+    output_data: OutputData = Field(default_factory=OutputData)
+
+    # Class-level slot for the CLI-supplied TOML path
+    # Set this *before* instantiating Settings:
+    #
+    #      Settings._toml_path = Path("config.toml")
+    #      cfg = Settings()
+    #
+    _toml_path: ClassVar[Path | None] = None
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: Type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        model_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """
+        Returns the ordered tuple of sources.
+
+        pydantic-settings v2 processes this tuple in *reverse* order using
+        deep_update, so the first entry listed here wins. Sub-model dicts
+        are merged field-by-field, not replaced wholesale – meaning TOML can
+        override just `llm.model` while the env still provides `llm.api_key`.
+        """
+        sources: list[PydanticBaseSettingsSource] = [init_settings]
+        if cls._toml_path is not None:
+            sources.append(TomlConfigSource(settings_cls, cls._toml_path))
+        sources += [env_settings, dotenv_settings, model_settings]
+        return tuple(sources)
+
+
+def setup_logging(log_settings: LogSettings) -> None:
     """Configure loguru logger with level-based output routing.
 
     INFO and DEBUG messages go to stdout.
     WARNING and above go to stderr.
     """
-    settings = get_settings()
-
     # Remove default handler
     logger.remove()
 
     # INFO and DEBUG to stdout
     logger.add(
         sys.stdout,
-        format=settings.log.format,
-        level=settings.log.level,
+        format=log_settings.format,
+        level=log_settings.level,
         filter=lambda record: record["level"].name in ("DEBUG", "INFO"),
         colorize=True,
     )
@@ -126,10 +316,24 @@ def setup_logging() -> None:
     # WARNING and above to stderr
     logger.add(
         sys.stderr,
-        format=settings.log.format,
+        format=log_settings.format,
         level="WARNING",
         colorize=True,
     )
+
+
+def get_settings(toml_path: Path) -> Settings:
+    """Get the global settings instance."""
+    # Thread the TOML path into the settings class BEFORE instantiation.
+    # settings_customise_sources() is a class method that runs during model
+    # construction, so the class variable must be set first.
+    Settings._toml_path = toml_path
+
+    settings = Settings()
+
+    setup_logging(log_settings=settings.log)
+
+    return settings
 
 
 # Export logger for use in other modules
