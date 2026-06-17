@@ -65,6 +65,7 @@ class Reviewer:
                 f"\nThe text is a {doc_type}{titled}."
             )
 
+        has_user_glossary = bool(user_glossary_str)
         has_any_glossary = bool(user_glossary_str or auto_glossary_str)
 
         dictionary_part = ""
@@ -101,7 +102,7 @@ class Reviewer:
             "missing / untranslated parts, wrong translation (distortion of "
             "sense), unnecessary additions, spelling mistakes, wrong numbers "
             "and codes"
-            f"{', deviation from the set dictionary' if has_any_glossary else ''} etc.\n"
+            f"{', deviation from the set dictionary' if has_user_glossary else ''} etc.\n"
             f"{dictionary_part}"
             "As a result provide a list of mistakes and potential "
             "improvements to the translation."
