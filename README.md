@@ -109,6 +109,7 @@ All sections and their keys:
 |               | `temperature`                  | —                               | `float` or unset for model default                  |
 |               | `reasoning_effort`             | —                               | `none`, `minimal`, `low`, `medium`, `high`, `xhigh` |
 | `chunk`       | `size`                         | `6000`                          | Max chunk size in characters                        |
+|               | `divider`                      | —                               | Char for manual chunking (splits on `----------` etc.) |
 |               | `max_concurrent`               | `3`                             | Max simultaneous LLM calls per task                 |
 |               | `delay_seconds`                | `1.5`                           | Seconds between launching chunk tasks               |
 | `glossary`    | `xml_dir_path`                 | `"files/glossary"`              | Dir with Multiterm `.xml` exports                   |
@@ -124,6 +125,7 @@ LLM__MODEL=qwen/qwen3.7-max
 LLM__TEMPERATURE=0.1
 LLM__REASONING_EFFORT=high
 CHUNK__SIZE=6000
+CHUNK__DIVIDER=-
 CHUNK__MAX_CONCURRENT=3
 CHUNK__DELAY_SECONDS=1.5
 GLOSSARY__XML_DIR_PATH=files/glossary
@@ -164,6 +166,13 @@ auto_glossary = true
 ```
 
 This sends the full source + target text (no chunking) to the LLM and asks it to report critical mistakes: missing/incorrect translations, distortions, spelling errors, wrong numbers, dictionary deviations.
+
+To enable chunked review with manual dividers, set `divider` in the `[chunk]` section (source and target must have the same number of chunks):
+
+```toml
+[chunk]
+divider = "-"    # splits on "----------" lines
+```
 
 ### Dry-run (print prompts only)
 

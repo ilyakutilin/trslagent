@@ -2,8 +2,8 @@
 
 This module provides proofreading/review: building prompts with glossary
 and document context, and calling the LLM to check existing translations
-for critical mistakes. Unlike translation, review operates on the full
-text without chunking.
+for critical mistakes. Review can be chunked when `chunk.divider` is set,
+mirroring the translation path's concurrency pattern.
 """
 
 from iso639 import Lang

@@ -63,6 +63,14 @@ class ChunkSettings(BaseSettings):
     """Text chunking settings"""
 
     size: int = Field(default=6000, description="Maximum chunk size in characters")
+    divider: str | None = Field(
+        default=None,
+        description=(
+            "Character for manual chunk splitting. When set, the text is split on "
+            "lines consisting of this character repeated 10+ times (e.g. '----------'). "
+            "Overrides size-based chunking. Applied to both source and target in review mode."
+        ),
+    )
     max_concurrent: int = Field(
         default=3, description="Max simultaneous LLM API calls"
     )

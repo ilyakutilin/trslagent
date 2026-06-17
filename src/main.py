@@ -7,7 +7,7 @@ from src.glossary.parser import AutoGlossaryParser, UserGlossaryParser
 from src.lemmatizer import Lemmatizer
 from src.llm import LLM, fetch_cost
 from src.reviewer import Reviewer
-from src.splitter import split_text, stitch_chunks
+from src.splitter import split_by_divider, split_text, stitch_chunks
 from src.translator import Translator
 
 from iso639 import Lang
@@ -143,10 +143,104 @@ async def main(cfg: Settings) -> str | None:
         source_lang = cfg.input_data.source_lang
         target_lang = cfg.input_data.target_lang
 
+        source_text = cfg.input_data.source_text or ""
+        target_text = cfg.input_data.target_text or ""
+
+        if cfg.chunk.divider:
+            src_chunks = split_by_divider(text=source_text, divider=cfg.chunk.divider)
+            tgt_chunks = split_by_divider(text=target_text, divider=cfg.chunk.divider)
+            logger.info(
+                f"Split source into {len(src_chunks)} chunks, "
+                f"target into {len(tgt_chunks)} chunks "
+                f"using divider '{cfg.chunk.divider}'"
+            )
+
+            if len(src_chunks) != len(tgt_chunks):
+                raise ValueError(
+                    f"Manual chunk count mismatch in review mode: "
+                    f"source has {len(src_chunks)} chunks, "
+                    f"target has {len(tgt_chunks)} chunks. "
+                    f"Chunk counts must be equal."
+                )
+
+            term_matcher = None
+            if auto_glossary_entries:
+                term_matcher = TermMatcher(glossary_entries=auto_glossary_entries)
+
+            def _glossary_for_review_chunk(
+                chunk: str,
+            ) -> tuple[list[GlossaryEntry], list[GlossaryEntry]]:
+                if term_matcher is not None:
+                    matched = term_matcher.match(
+                        text=chunk, lang=source_lang, lemmatizer=lemmatizer
+                    )
+                    return _deduplicate_entries(matched, user_glossary_entries, source_lang)
+                return user_glossary_entries.copy(), []
+
+            review_results: list[str] = []
+            completion_ids: list[str] = []
+
+            if llm is None:
+                for i, (src, tgt) in enumerate(zip(src_chunks, tgt_chunks)):
+                    logger.info(
+                        f"Processing review chunk {i + 1}/{len(src_chunks)} "
+                        f"(src_length={len(src)}, tgt_length={len(tgt)})"
+                    )
+                    chunk_user_entries, chunk_auto_entries = _glossary_for_review_chunk(src)
+                    user_g_str = _stringify_glossary(chunk_user_entries, source_lang, target_lang)
+                    auto_g_str = _stringify_glossary(chunk_auto_entries, source_lang, target_lang)
+                    await reviewer.review_text_async(src, tgt, user_g_str, auto_g_str)
+                return None
+
+            semaphore = asyncio.Semaphore(cfg.chunk.max_concurrent)
+
+            async def _process_single_review_chunk(i, src_chunk, tgt_chunk):
+                if i > 0 and cfg.chunk.max_concurrent > 1:
+                    await asyncio.sleep(cfg.chunk.delay_seconds)
+                async with semaphore:
+                    logger.info(
+                        f"Reviewing chunk {i + 1}/{len(src_chunks)} "
+                        f"(src_length={len(src_chunk)}, tgt_length={len(tgt_chunk)})"
+                    )
+                    chunk_user_entries, chunk_auto_entries = _glossary_for_review_chunk(src_chunk)
+                    user_g_str = _stringify_glossary(chunk_user_entries, source_lang, target_lang)
+                    auto_g_str = _stringify_glossary(chunk_auto_entries, source_lang, target_lang)
+                    return await reviewer.review_text_async(src_chunk, tgt_chunk, user_g_str, auto_g_str)
+
+            tasks = [
+                _process_single_review_chunk(i, src, tgt)
+                for i, (src, tgt) in enumerate(zip(src_chunks, tgt_chunks))
+            ]
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for i, result in enumerate(results):
+                if isinstance(result, BaseException):
+                    logger.warning(f"Review chunk {i + 1} failed: {result}, skipping")
+                elif result is not None:
+                    review_text, chunk_id = result
+                    if review_text is not None:
+                        review_results.append(review_text)
+                    if chunk_id:
+                        completion_ids.append(chunk_id)
+
+            result = stitch_chunks(review_results)
+
+            logger.info(
+                f"Review complete: "
+                f"source={len(source_text)} chars, "
+                f"target={len(target_text)} chars, "
+                f"result={len(result) if result else 0} chars"
+            )
+
+            api_key = cfg.llm.api_key.get_secret_value()
+            await _resolve_and_log_cost(completion_ids, api_key, cfg)
+
+            return result
+
         if auto_glossary_entries:
             term_matcher = TermMatcher(glossary_entries=auto_glossary_entries)
             matched = term_matcher.match(
-                text=cfg.input_data.source_text or "",
+                text=source_text,
                 lang=source_lang,
                 lemmatizer=lemmatizer,
             )
@@ -165,8 +259,8 @@ async def main(cfg: Settings) -> str | None:
         )
 
         result, completion_id = await reviewer.review_text_async(
-            source_text=cfg.input_data.source_text or "",
-            target_text=cfg.input_data.target_text or "",
+            source_text=source_text,
+            target_text=target_text,
             user_glossary_str=user_glossary_str,
             auto_glossary_str=auto_glossary_str,
         )
@@ -179,8 +273,8 @@ async def main(cfg: Settings) -> str | None:
 
         logger.info(
             f"Review complete: "
-            f"source={len(cfg.input_data.source_text or "")} chars, "
-            f"target={len(cfg.input_data.target_text or "")} chars, "
+            f"source={len(source_text)} chars, "
+            f"target={len(target_text)} chars, "
             f"result={len(result) if result else 0} chars"
         )
 
@@ -198,8 +292,12 @@ async def main(cfg: Settings) -> str | None:
     )
 
     text = cfg.input_data.source_text or ""
-    chunks = split_text(text=text, chunk_size=cfg.chunk.size)
-    logger.info(f"Split text into {len(chunks)} chunks (size={cfg.chunk.size})")
+    if cfg.chunk.divider:
+        chunks = split_by_divider(text=text, divider=cfg.chunk.divider)
+        logger.info(f"Split text into {len(chunks)} chunks using divider '{cfg.chunk.divider}'")
+    else:
+        chunks = split_text(text=text, chunk_size=cfg.chunk.size)
+        logger.info(f"Split text into {len(chunks)} chunks (size={cfg.chunk.size})")
 
     is_extract = len(chunks) > 1
 

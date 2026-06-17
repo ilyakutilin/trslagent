@@ -23,6 +23,7 @@ source_file_path = "files/source.txt"
 
 [chunk]
 # size = 6000
+# divider = "-"    # split on lines of repeated chars (---------- etc.); overrides size
 # max_concurrent = 3
 # delay_seconds = 1.5
 

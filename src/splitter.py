@@ -3,7 +3,10 @@ Text Splitting Module
 =====================
 Splits large documents into chunks that respect sentence and paragraph boundaries.
 Uses RecursiveCharacterTextSplitter for sentence-safe chunking.
+Supports manual divider-based splitting via repeated character lines.
 """
+
+import re
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
@@ -28,6 +31,18 @@ def split_text(text: str, chunk_size: int) -> list[str]:
     )
     chunks = splitter.split_text(text)
     return chunks
+
+
+def split_by_divider(text: str, divider: str) -> list[str]:
+    """
+    Splits text on lines consisting of `divider` repeated 10 or more times.
+
+    Example: if divider is \"-\", lines like \"----------\" or \"--------------------\"
+    act as separators and are removed from the output.
+    """
+    pattern = r"^" + re.escape(divider) + r"{10,}$"
+    parts = re.split(pattern, text, flags=re.MULTILINE)
+    return [p.strip() for p in parts if p.strip()]
 
 
 def stitch_chunks(chunks: list[str]) -> str:
