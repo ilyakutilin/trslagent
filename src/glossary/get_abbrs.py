@@ -30,7 +30,7 @@ def _flatten_terms(entries: list[GlossaryEntry]) -> list[Term]:
 settings = get_settings()
 lemmatizer = Lemmatizer()
 main_glossary_entries = MainGlossaryParser(
-    dir_path=settings.glossary.xml_dir,
+    dir_path=settings.glossary.xml_dir_path,
     lemmatizer=lemmatizer,
 ).parse()
 terms = _flatten_terms(main_glossary_entries)

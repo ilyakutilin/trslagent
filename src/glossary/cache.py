@@ -1,17 +1,15 @@
 import pickle
 from pathlib import Path
 
-from src.config import get_settings, logger
+from src.config import logger
 from src.glossary.models import CachedEntries, GlossaryEntry, GlossaryFile
-
-settings = get_settings()
 
 
 class GlossaryCache:
     def __init__(
         self,
         glossary_file: GlossaryFile,
-        cache_dir: str | Path = settings.glossary.xml_dir,
+        cache_dir: str | Path,
     ) -> None:
         self.glossary_file = glossary_file
         self.cache_file = self._get_cache_file_path(Path(cache_dir))

@@ -13,7 +13,7 @@ from xml.etree import ElementTree
 from iso639 import Lang
 from iso639.exceptions import InvalidLanguageValue
 
-from src.config import get_settings, logger
+from src.config import logger
 from src.glossary.cache import GlossaryCache
 from src.glossary.models import (
     CachedEntries,
@@ -23,8 +23,6 @@ from src.glossary.models import (
     Term,
 )
 from src.lemmatizer import GlossaryLemmatizer, Lemmatizer
-
-settings = get_settings()
 
 
 class ParserError(Exception):
@@ -630,7 +628,9 @@ class MainGlossaryParser:
         Returns:
             CachedEntries object containing cached glossary entries.
         """
-        return GlossaryCache(glossary_file).get_cache()
+        return GlossaryCache(
+            glossary_file=glossary_file, cache_dir=self.dir_path
+        ).get_cache()
 
     def _parse_xml_file(self, xml_file: Path) -> list[GlossaryEntry]:
         """Parse a single XML file and return its entries.
@@ -674,6 +674,6 @@ class MainGlossaryParser:
         Returns:
             Path to the updated cache file.
         """
-        gc = GlossaryCache(glossary_file)
+        gc = GlossaryCache(glossary_file=glossary_file, cache_dir=self.dir_path)
         gc.write_cache(entries)
         return gc.cache_file
