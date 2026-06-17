@@ -51,6 +51,9 @@ package = true
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
 
+[tool.ruff]
+include = ["src/**/*.py", "tests/**/*.py"]
+
 [dependency-groups]
 dev = [
     "pyright>=1.1.410",
@@ -59,4 +62,5 @@ dev = [
     "pytest-cov>=6.0",
     "pytest-mock>=3.14",
     "respx>=0.22",
+    "ruff>=0.15.17",
 ]
