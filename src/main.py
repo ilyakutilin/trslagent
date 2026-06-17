@@ -103,7 +103,7 @@ def main(cfg: Settings) -> str | None:
         if main_glossary_entries:
             term_matcher = TermMatcher(glossary_entries=main_glossary_entries)
             matched = term_matcher.match(
-                text=cfg.input_data.source_text,
+                text=cfg.input_data.source_text or "",
                 lang=source_lang,
                 lemmatizer=lemmatizer,
             )
@@ -118,15 +118,15 @@ def main(cfg: Settings) -> str | None:
         )
 
         result = reviewer.review_text(
-            source_text=cfg.input_data.source_text,
-            target_text=cfg.input_data.target_text,
+            source_text=cfg.input_data.source_text or "",
+            target_text=cfg.input_data.target_text or "",
             glossary_str=glossary_str,
         )
 
         logger.info(
             f"Review complete: "
-            f"source={len(cfg.input_data.source_text)} chars, "
-            f"target={len(cfg.input_data.target_text)} chars, "
+            f"source={len(cfg.input_data.source_text or "")} chars, "
+             f"target={len(cfg.input_data.target_text or "")} chars, "
             f"result={len(result) if result else 0} chars"
         )
 
