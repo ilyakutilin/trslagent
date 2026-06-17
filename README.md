@@ -1,199 +1,266 @@
-# AI Translation Agent
+# trslagent — AI Translation Agent
 
-Translates large documents using:
+Glossary-aware LLM document translation and review. Takes an `.xml` glossary (Multiterm export) or a plain-text project glossary, matches terms against source text with lemmatization and Aho-Corasick, then sends chunked text to an LLM (OpenRouter) for translation — or reviews an existing translation for critical mistakes.
 
-- **LangChain** for sentence-safe text chunking
-- **multilingual-e5-large** embeddings for cross-lingual glossary search
-- **ChromaDB** for local persistent vector storage (glossary RAG)
-- **OpenRouter** for LLM access (any model)
+## Architecture overview
 
----
+```
+Config TOML
+    │
+    ├── Glossary  ──► parse .xml (Multiterm) + .txt (project)  ──► lemmatize
+    │                                                              │
+    ├── Source text ──► chunk (RecursiveCharacterTextSplitter) ─┐  │
+    │                                                           │  │
+    │   For each chunk:                                         │  │
+    │     match glossary terms (Aho-Corasick on lemmas)  ◄──────┘  │
+    │     deduplicate (project overrides main)                     │
+    │     build LLM prompt (system + user + dictionary)            │
+    │     call OpenRouter LLM                                      │
+    │                                                              │
+    └── Stitch ──► write result
+```
+
+## Project structure
+
+```
+src/
+├── cli.py                    # entry point — the only CLI
+├── config.py                 # configuration system (pydantic-settings)
+├── main.py                   # pipeline orchestrator
+├── llm.py                    # OpenRouter API wrapper (5-retry backoff)
+├── translator.py             # per-chunk translation prompt builder
+├── reviewer.py               # full-text review/proofread (no chunking)
+├── splitter.py               # text → chunks → stitch
+├── lemmatizer.py             # EN (spaCy) / RU (pymorphy3) lemmatizer
+├── utils.py                  # file I/O helpers
+├── glossary/
+│   ├── parser.py             # XML & project-glossary parsers + cache logic
+│   ├── cache.py              # .pickle cache (SHA-256 validated)
+│   ├── matcher.py            # Aho-Corasick term matching
+│   ├── models.py             # Term, GlossaryEntry, GlossaryFile
+│   └── get_abbrs.py          # standalone abbreviation extractor
+files/
+├── config.toml               # working config
+├── source.txt                # sample source
+├── projgloss.txt             # sample project glossary
+├── abbrs                     # known abbreviations (auto-extracted)
+└── glossary/                 # main glossary XMLs + .pickle caches
+config.example.toml           # config reference
+.env.example                  # env vars reference
+```
 
 ## Setup
 
+**Requirements:** Python 3.13, [uv](https://docs.astral.sh/uv/).
+
 ```bash
-# Install dependencies
 uv sync
-```
 
-The first run will download the `multilingual-e5-large` model (~2GB). This is cached locally by `sentence-transformers` — subsequent runs are instant.
+# spaCy model — must be installed manually
+python -m spacy download en_core_web_sm
 
----
-
-## Glossary format
-
-Glossaries shall be XML files can be obtained by exporting from Multiterm with the default settings. No further converting is required.
-Put all glossaries in one dir and set the path to that dir in the .env file or as a cli argument.
-
-==========
-
-The glossary is **bidirectional** — you only need each pair once. The system embeds both directions so queries from either language find the right entry.
-
----
-
-## Usage
-
-### Command line
-
-#### translator.py
-
-```bash
-python src/translator.py document.txt English German \
-    --glossary glossary.csv \
-    --output translated.txt \
-    --model anthropic/claude-3.5-sonnet
-```
-
-**Positional arguments:**
-
-| Argument      | Description                        |
-| ------------- | ---------------------------------- |
-| `input_file`  | Path to the text file to translate |
-| `source_lang` | Source language (e.g., 'English')  |
-| `target_lang` | Target language (e.g., 'German')   |
-
-**Optional arguments:**
-
-| Argument              | Description                                                             |
-| --------------------- | ----------------------------------------------------------------------- |
-| `--glossary`          | Path to glossary CSV or XLSX file (default: `glossary.csv`)             |
-| `--glossary-override` | Path to glossary override file (format: `term = translation`)           |
-| `--sync-glossary`     | Sync glossary (add/update/delete terms) instead of just loading         |
-| `--output`            | Output file path (default: `translated.txt`)                            |
-| `--model`             | OpenRouter model string (default: configured in `.env`)                 |
-| `--print-prompt-only` | Print prompts that would be sent to the LLM without actually calling it |
-
-**Glossary override:**
-
-You can provide a glossary override file to use specific translations for certain terms in specific documents, overriding the embedded glossary.
-
-Create a text file (e.g., `override.txt`) with one term per line in the format:
-
-```
-AGREEMENT = ДОГОВОР
-contract = контракт
-party = сторона
-```
-
-- Lines starting with `#` are treated as comments
-- Blank lines are ignored
-- Format: `source_term = target_term`
-
-Use it with the `--glossary-override` flag:
-
-```bash
-python src/translator.py document.txt English German \
-    --glossary glossary.csv \
-    --glossary-override override.txt \
-    --output translated.txt
-```
-
-The override glossary takes priority over the embedded glossary. If a term appears in both, the override translation is used. If a term only appears in the override (and in the document), it's added to the prompt.
-
-This is useful when you have domain-specific documents where certain terms should be translated differently than in your main glossary (e.g., a contract from a different company project).
-
-#### glossary_manager.py
-
-```bash
-python src/glossary_manager.py sync --glossary glossary.csv
-```
-
-**Subcommands:**
-
-| Command | Description                                           |
-| ------- | ----------------------------------------------------- |
-| `sync`  | Sync glossary with ChromaDB (add/update/delete terms) |
-
-**Arguments:**
-
-| Argument     | Description                                                 |
-| ------------ | ----------------------------------------------------------- |
-| `--glossary` | Path to glossary CSV or XLSX file (default: `glossary.csv`) |
-
----
-
-### In Python
-
-```python
-from src.glossary_manager import GlossaryManager
-from src.translator import translate_document
-
-gm = GlossaryManager()
-gm.load_glossary("glossary.csv")   # embeds on first run, cached after
-
-result = translate_document(
-    text=open("document.txt").read(),
-    source_lang="English",
-    target_lang="German",
-    glossary_manager=gm,
-    model="anthropic/claude-3.5-sonnet",  # or any OpenRouter model string
-)
-
-print(result)
-```
-
----
-
-## How it works
-
-```
-Large text
-    │
-    ▼
-[split_text()]  ← RecursiveCharacterTextSplitter
-    │             Splits on: \n\n → \n → ". " → words
-    │             Never cuts mid-sentence
-    │
-    ├── For each chunk:
-    │       │
-    │       ▼
-    │   [Embed chunk] ──► query ChromaDB ──► Top-20 glossary terms
-    │       │
-    │       ▼
-    │   [LLM prompt]:
-    │     "Translate EN→DE.
-    │      MANDATORY GLOSSARY: term1 → Term1, term2 → Term2 ...
-    │      PREVIOUS SEGMENT: [tail of last translation]
-    │      TEXT: [chunk]"
-    │       │
-    │       ▼
-    │   Translated chunk
-    │
-    ▼
-[stitch_chunks()]  ← deduplicates overlap at seams
-    │
-    ▼
-Final translated document
-```
-
----
-
-## Configuration
-
-```bash
+# Configure secrets
 cp .env.example .env
+# Edit .env: set LLM__API_KEY=your-openrouter-key
 chmod 600 .env
 ```
 
-Then edit the values.
+## Configuration
 
----
+Settings are loaded with priority: **TOML > env vars > `.env` > defaults**.
 
-## On the embedding model
+Env vars use `__` as nesting delimiter: `LLM__MODEL`, `CHUNK__SIZE`, `GLOSSARY__XML_DIR_PATH`, `LOG__LEVEL`, etc.
 
-`intfloat/multilingual-e5-large` is a strong choice for this use case because:
+### TOML config
 
-- Trained on 100+ languages — maps equivalent terms across languages to nearby vectors
-- Optimised for retrieval (the "e5" = embed-everything architecture)
-- Handles domain-specific vocabulary well (legal, medical, technical)
-- The `large` variant is more accurate than `small`/`base`; since glossary embedding is a one-time cost, the extra size is fine
+Minimal config for translation:
 
-A lighter alternative is `intfloat/multilingual-e5-small` (~120MB vs ~2GB) — good for testing.
+```toml
+[input_data]
+source_lang = "en"
+target_lang = "ru"
+source_file_path = "files/source.txt"
+auto_glossary = true
 
----
+[output_data]
+result_file_path = "files/result.md"
+```
 
-## Tips
+All sections and their keys:
 
-- **Lower temperature** (`0.1`) in the config gives more consistent, literal output — appropriate for technical/legal documents.
-- **Chunk size tuning**: larger chunks = more context per prompt = better translation quality, but higher cost. Start with 6000 characters and adjust.
-- **OpenRouter model strings**: find them at https://openrouter.ai/models
+| Section       | Key                            | Default                         | Description                                         |
+| ------------- | ------------------------------ | ------------------------------- | --------------------------------------------------- |
+| `input_data`  | `source_lang`                  | `"en"`                          | ISO 639-1 code or full name                         |
+|               | `target_lang`                  | `"en"`                          | ISO 639-1 code or full name                         |
+|               | `specialized_in`               | —                               | Domain expertise for system prompt                  |
+|               | `doc_type`                     | —                               | e.g. `"letter"`, `"procedure"`                      |
+|               | `doc_title`                    | —                               | Document title for prompt context                   |
+|               | `source_file_path`             | `"files/source.txt"`            | Input text file                                     |
+|               | `target_file_path`             | —                               | Set to enable **review mode**                       |
+|               | `auto_glossary`                | `false`                         | Match main glossary against source                  |
+|               | `glossary_file_path`           | —                               | Path to project glossary `.txt`                     |
+| `output_data` | `result_file_path`             | `"files/result.md"`             | Output file                                         |
+|               | `raw_result_file_path`         | `"files/raw_result.json"`       | (unused)                                            |
+|               | `print_prompt_only`            | `false`                         | Dry-run: print prompts, skip LLM                    |
+|               | `timestamped_result_filenames` | `true`                          | Append `_YYYY-MM-DD_HH-MM-SS`                       |
+| `llm`         | `base_url`                     | `https://openrouter.ai/api/v1`  |                                                     |
+|               | `api_key`                      | from `.env`                     | OpenRouter key                                      |
+|               | `model`                        | `"anthropic/claude-3.5-sonnet"` | Any OpenRouter model string                         |
+|               | `temperature`                  | —                               | `float` or unset for model default                  |
+|               | `reasoning_effort`             | —                               | `none`, `minimal`, `low`, `medium`, `high`, `xhigh` |
+| `chunk`       | `size`                         | `6000`                          | Max chunk size in characters                        |
+| `glossary`    | `xml_dir_path`                 | `"files/glossary"`              | Dir with Multiterm `.xml` exports                   |
+|               | `known_abbrs_file_path`        | —                               | Path to abbreviations list                          |
+| `log`         | `level`                        | `"INFO"`                        | `DEBUG`/`INFO`/`WARNING`/`ERROR`/`CRITICAL`         |
+|               | `format`                       | loguru default                  | Custom log format string                            |
+
+### `.env` entries
+
+```
+LLM__API_KEY=sk-or-v1-...
+LLM__MODEL=qwen/qwen3.7-max
+LLM__TEMPERATURE=0.1
+LLM__REASONING_EFFORT=high
+CHUNK__SIZE=6000
+GLOSSARY__XML_DIR_PATH=files/glossary
+GLOSSARY__KNOWN_ABBRS_FILE_PATH=files/abbrs
+LOG__LEVEL=INFO
+```
+
+Note: `LLM__API_KEY` is stored as a `SecretStr` and must be set in `.env` or as an env var — not in TOML.
+
+## Usage
+
+### Translation
+
+```bash
+python src/cli.py files/config.toml
+```
+
+What happens:
+
+1. Main glossary XMLs are parsed (cached as `.pickle`, re-parsed only if XML changed)
+2. Project glossary (if configured) is parsed and lemmatized
+3. Source text is split into chunks
+4. For each chunk, glossary terms are matched via lemmatized Aho-Corasick, project glossary overrides main where they conflict, matched terms are injected into the LLM system prompt
+5. Chunks are translated and stitched back together
+6. Result is written to `result_file_path`
+
+### Review
+
+Set `target_file_path` in your TOML to enable review mode:
+
+```toml
+[input_data]
+source_lang = "en"
+target_lang = "ru"
+source_file_path = "files/source.md"
+target_file_path = "files/result.md"    # existing translation
+auto_glossary = true
+```
+
+This sends the full source + target text (no chunking) to the LLM and asks it to report critical mistakes: missing/incorrect translations, distortions, spelling errors, wrong numbers, dictionary deviations.
+
+### Dry-run (print prompts only)
+
+Either set in TOML:
+
+```toml
+[output_data]
+print_prompt_only = true
+```
+
+Or via env: `LLM_OUTPUT_DATA__PRINT_PROMPT_ONLY=true`
+
+This skips all LLM calls and prints the constructed system + user prompts to stdout.
+
+### Export glossary matches
+
+```bash
+python src/cli.py files/config.toml --match-glossary --match-output matches.txt
+```
+
+Runs the full glossary matching pipeline and writes the matched term=translation pairs to the specified file. No LLM calls are made.
+
+### Extract abbreviations
+
+```bash
+python src/glossary/get_abbrs.py files/config.toml
+```
+
+Scans the main glossary for abbreviation-like terms (all-uppercase or mixed-case, ≤8 chars) and writes them to `files/abbrs`. These are then excluded from lemmatization during matching.
+
+## Glossary
+
+### Main glossary (Multiterm XML)
+
+Export from Multiterm with default settings. Place all `.xml` files in one directory (default: `files/glossary`).
+
+Expected XML structure (`<mtf>` root):
+
+```xml
+<mtf>
+  <conceptGrp>
+    <concept>1234</concept>
+    <languageGrp>
+      <language lang="EN" type="English"/>
+      <termGrp><term>work package</term></termGrp>
+    </languageGrp>
+    <languageGrp>
+      <language lang="RU" type="Russian"/>
+      <termGrp><term>комплекс работ</term></termGrp>
+    </languageGrp>
+  </conceptGrp>
+</mtf>
+```
+
+- The glossary is **bidirectional** — entries are used regardless of which language is source vs target
+- Synonyms are split by `;` or `|`
+- Cache is stored as `.pickle` files alongside the XMLs, validated by SHA-256 hash
+
+### Project glossary (override)
+
+Plain text file, one entry per line:
+
+```
+AGREEMENT = СОГЛАШЕНИЕ
+mechanical completion = завершение механомонтажных работ
+MOP | MOP test = испытание под максимальным рабочим давлением
+commissioning = пусконаладка | ПНР
+```
+
+- `#` lines are comments, blank lines are ignored
+- Format: `source_term = target_term`
+- Synonyms separated by `;` or `|`
+- **Project glossary always overrides the main glossary** on a per-term basis
+- Terms in the project glossary that don't appear in the main glossary are still included
+
+## Lemmatization
+
+- **English**: spaCy `en_core_web_sm` (must be manually installed)
+- **Russian**: pymorphy3
+- **Other languages**: not supported — terms are skipped
+- Known abbreviations (from `files/abbrs`) are preserved as-is during lemmatization
+
+## LLM
+
+Uses the OpenRouter API (OpenAI-compatible endpoint). 5 retries with exponential backoff for timeouts, rate limits, and connection errors. Other errors raise immediately.
+
+System prompt structure for translation:
+
+```
+You are a professional experienced translator specialized in <domain>.
+Translate from <source> into <target>.
+The text for translation is an extract from a <doc_type> titled '<doc_title>'.
+Use the following dictionary...
+<dictionary start>
+SOURCE_TERM = TARGET_TERM
+<dictionary end>
+```
+
+## Development notes
+
+- **No tests, no linting, no CI.** This project has none.
+- `src/models.py` is legacy/dead code — everything is in `src/config.py`.
+- `pyproject.toml` defines `trslagent = "src.cli:cli"` as a console script (available after `uv sync`).
+- The `tmp/` directory contains experimental scratch files and is not part of the production codebase.
