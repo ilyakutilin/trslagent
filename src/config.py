@@ -8,6 +8,7 @@ via environment variables or .env file.
 
 import sys
 import tomllib
+from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any, ClassVar, Literal, Self, Type
 
@@ -216,6 +217,14 @@ class OutputData(BaseModel):
             "that would be fed to LLM"
         ),
     )
+
+    def get_result_file_path(self) -> Path:
+        if not self.timestamped_result_filenames:
+            return self.result_file_path
+        ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+        return self.result_file_path.with_stem(
+            f"{self.result_file_path.stem}_{ts}"
+        )
 
 
 class TomlConfigSource(PydanticBaseSettingsSource):

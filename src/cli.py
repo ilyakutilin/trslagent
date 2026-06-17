@@ -47,7 +47,8 @@ def cli() -> None:
 
     translation = asyncio.run(main(cfg=settings))
     if translation:
-        with open(settings.output_data.result_file_path, "w", encoding="utf-8") as f:
+        result_path = settings.output_data.get_result_file_path()
+        with open(result_path, "w", encoding="utf-8") as f:
             f.write(translation)
 
 
