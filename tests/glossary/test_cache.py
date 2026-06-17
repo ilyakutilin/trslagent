@@ -5,7 +5,7 @@ import pytest
 from iso639 import Lang
 
 from src.glossary.cache import GlossaryCache
-from src.glossary.models import CachedEntries, GlossaryEntry, GlossaryFile, Term
+from src.glossary.models import GlossaryEntry, GlossaryFile, Term
 
 
 def _make_entry(entry_id: int, en_val: str, ru_val: str) -> GlossaryEntry:
