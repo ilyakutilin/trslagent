@@ -5,7 +5,7 @@ from src.glossary.matcher import TermMatcher
 from src.glossary.models import GlossaryEntry
 from src.glossary.parser import MainGlossaryParser, ProjectGlossaryParser
 from src.lemmatizer import Lemmatizer
-from src.llm import LLM
+from src.llm import LLM, fetch_cost
 from src.reviewer import Reviewer
 from src.splitter import split_text, stitch_chunks
 from src.translator import Translator
@@ -73,6 +73,48 @@ def _deduplicate_entries(
     return all_entries
 
 
+async def _resolve_and_log_cost(
+    completion_ids: list[str],
+    api_key: str,
+    cfg: Settings,
+) -> None:
+    if not cfg.cost.generation_info_url:
+        return
+    if not completion_ids:
+        return
+
+    cost_tasks = [
+        fetch_cost(cid, api_key, cfg.cost) for cid in completion_ids
+    ]
+    cost_results = await asyncio.gather(*cost_tasks, return_exceptions=True)
+
+    known_costs: list[float] = []
+    unknown_count = 0
+    for i, c in enumerate(cost_results):
+        if isinstance(c, BaseException):
+            logger.warning(
+                f"Cost fetch failed for completion {completion_ids[i]}: {c}"
+            )
+            unknown_count += 1
+        elif c is None:
+            unknown_count += 1
+        else:
+            known_costs.append(c)
+
+    known_total = sum(known_costs) if known_costs else 0.0
+    if unknown_count > 0 and not known_costs:
+        logger.info("Cost: UNKNOWN")
+    elif unknown_count > 0:
+        logger.info(
+            f"Cost: {known_total:.2f} {cfg.cost.cost_currency}"
+            f" ({unknown_count}/{len(completion_ids)} unknown)"
+        )
+    else:
+        logger.info(
+            f"Cost: {known_total:.2f} {cfg.cost.cost_currency}"
+        )
+
+
 async def main(cfg: Settings) -> str | None:
     lemmatizer = Lemmatizer()
 
@@ -119,18 +161,26 @@ async def main(cfg: Settings) -> str | None:
             review_glossary_entries, source_lang, target_lang
         )
 
-        result = await reviewer.review_text_async(
+        result, completion_id = await reviewer.review_text_async(
             source_text=cfg.input_data.source_text or "",
             target_text=cfg.input_data.target_text or "",
             glossary_str=glossary_str,
         )
 
+        completion_ids: list[str] = []
+        if completion_id:
+            completion_ids.append(completion_id)
+
+        api_key = cfg.llm.api_key.get_secret_value() if llm else ""
+
         logger.info(
             f"Review complete: "
             f"source={len(cfg.input_data.source_text or "")} chars, "
-             f"target={len(cfg.input_data.target_text or "")} chars, "
+            f"target={len(cfg.input_data.target_text or "")} chars, "
             f"result={len(result) if result else 0} chars"
         )
+
+        await _resolve_and_log_cost(completion_ids, api_key, cfg)
 
         return result
 
@@ -196,7 +246,9 @@ async def main(cfg: Settings) -> str | None:
 
     semaphore = asyncio.Semaphore(cfg.chunk.max_concurrent)
 
-    async def _process_single_chunk(i: int, chunk: str) -> str | None:
+    async def _process_single_chunk(
+        i: int, chunk: str
+    ) -> tuple[str | None, str | None]:
         if i > 0 and cfg.chunk.max_concurrent > 1:
             await asyncio.sleep(cfg.chunk.delay_seconds)
 
@@ -221,13 +273,18 @@ async def main(cfg: Settings) -> str | None:
     tasks = [_process_single_chunk(i, chunk) for i, chunk in enumerate(chunks)]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
+    completion_ids: list[str] = []
     for i, result in enumerate(results):
         if isinstance(result, BaseException):
             logger.warning(
                 f"Chunk {i+1} failed with error: {result}, skipping"
             )
         elif result is not None:
-            translated_chunks.append(result)
+            chunk_text, chunk_id = result
+            if chunk_text is not None:
+                translated_chunks.append(chunk_text)
+            if chunk_id:
+                completion_ids.append(chunk_id)
         else:
             logger.warning(
                 f"Chunk {i+1} translation returned None unexpectedly, skipping"
@@ -238,6 +295,9 @@ async def main(cfg: Settings) -> str | None:
     logger.info(
         f"Translation complete: {len(text)} -> {len(result)} characters"
     )
+
+    api_key = cfg.llm.api_key.get_secret_value()
+    await _resolve_and_log_cost(completion_ids, api_key, cfg)
 
     return result
 

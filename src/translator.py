@@ -101,7 +101,7 @@ class Translator:
 
     async def translate_chunk_async(
         self, chunk: str, glossary_str: str, is_extract: bool
-    ) -> str | None:
+    ) -> tuple[str | None, str | None]:
         logger.info(f"Translating chunk (length={len(chunk)})")
 
         system_prompt = self._build_system_prompt(
@@ -113,13 +113,13 @@ class Translator:
         if self.llm is None:
             logger.warning("LLM not available, printing prompts only")
             self._print_prompts(system_prompt, user_prompt)
-            return None
+            return None, None
 
         logger.debug("Sending chunk to LLM")
-        translated_chunk = await self.llm.get_reply_async(
+        translated_chunk, completion_id = await self.llm.get_reply_async(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
         )
         logger.debug(f"Received translation: {len(translated_chunk)} characters")
 
-        return translated_chunk
+        return translated_chunk, completion_id

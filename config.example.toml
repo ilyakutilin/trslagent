@@ -32,3 +32,8 @@ source_file_path = "files/source.txt"
 
 [log]
 # level = "INFO"  # "DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"
+
+[cost]
+# generation_info_url = "https://openrouter.ai/api/v1/generation"  # URL for cost lookup; set to enable cost display
+# cost_key = "total_cost"  # key in the generation info JSON response
+# cost_currency = "USD"    # currency for cost display

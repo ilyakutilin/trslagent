@@ -83,6 +83,23 @@ class GlossarySettings(BaseSettings):
     )
 
 
+class CostSettings(BaseSettings):
+    """Cost tracking settings"""
+
+    generation_info_url: str | None = Field(
+        default=None,
+        description="URL for retrieving generation cost info via completion ID",
+    )
+    cost_key: str = Field(
+        default="total_cost",
+        description="Key to look for in the generation info API response JSON",
+    )
+    cost_currency: str = Field(
+        default="USD",
+        description="Currency for displaying cost totals",
+    )
+
+
 class LogSettings(BaseModel):
     """Logging settings"""
 
@@ -272,6 +289,7 @@ class Settings(BaseSettings):
     )
 
     llm: LLMSettings = Field(default_factory=LLMSettings)
+    cost: CostSettings = Field(default_factory=CostSettings)
     chunk: ChunkSettings = Field(default_factory=ChunkSettings)
     glossary: GlossarySettings = Field(default_factory=GlossarySettings)
     log: LogSettings = Field(default_factory=LogSettings)

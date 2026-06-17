@@ -113,7 +113,7 @@ class Reviewer:
 
     async def review_text_async(
         self, source_text: str, target_text: str, glossary_str: str
-    ) -> str | None:
+    ) -> tuple[str | None, str | None]:
         logger.info(
             f"Reviewing text "
             f"(source_length={len(source_text)}, "
@@ -126,10 +126,10 @@ class Reviewer:
         if self.llm is None:
             logger.warning("LLM not available, printing prompts only")
             self._print_prompts(system_prompt, user_prompt)
-            return None
+            return None, None
 
         logger.debug("Sending to LLM for review")
-        result = await self.llm.get_reply_async(
+        result, completion_id = await self.llm.get_reply_async(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
         )
@@ -137,4 +137,4 @@ class Reviewer:
             f"Received review: {len(result)} characters"
         )
 
-        return result
+        return result, completion_id

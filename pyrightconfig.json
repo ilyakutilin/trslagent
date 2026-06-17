@@ -1,6 +1,12 @@
 {
   "include": ["src"],
-  "exclude": ["**/__pycache__", "**/*.pyc"],
+  "exclude": [
+    "**/__pycache__",
+    "**/*.pyc",
+    "**/node_modules",
+    "**/.*",
+    ".venv"
+  ],
   "typeCheckingMode": "standard",
   "reportMissingTypeStubs": false,
   "reportMissingImports": true,
