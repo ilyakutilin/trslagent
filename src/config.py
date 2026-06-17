@@ -278,7 +278,7 @@ class Settings(BaseSettings):
         init_settings: PydanticBaseSettingsSource,
         env_settings: PydanticBaseSettingsSource,
         dotenv_settings: PydanticBaseSettingsSource,
-        model_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
     ) -> tuple[PydanticBaseSettingsSource, ...]:
         """
         Returns the ordered tuple of sources.
@@ -291,7 +291,7 @@ class Settings(BaseSettings):
         sources: list[PydanticBaseSettingsSource] = [init_settings]
         if cls._toml_path is not None:
             sources.append(TomlConfigSource(settings_cls, cls._toml_path))
-        sources += [env_settings, dotenv_settings, model_settings]
+        sources += [env_settings, dotenv_settings, file_secret_settings]
         return tuple(sources)
 
 
