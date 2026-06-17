@@ -1113,7 +1113,7 @@ wheels = [
 [[package]]
 name = "trslagent"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "iso639-lang" },
     { name = "langchain-text-splitters" },

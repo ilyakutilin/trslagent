@@ -15,3 +15,16 @@ dependencies = [
     "spacy>=3.8.14",
     "tqdm>=4.67.3",
 ]
+
+[project.scripts]
+trslagent = "src.cli:cli"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+package = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
