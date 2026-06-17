@@ -129,9 +129,11 @@ class TermMatcher:
             lemmatizer = Lemmatizer()
 
         flat_terms = self._flatten_terms()
-        automaton = self.build_automaton(
-            [ft.lemmatized for ft in flat_terms if ft.lemmatized is not None]
-        )
+        lemmatized = [ft.lemmatized for ft in flat_terms if ft.lemmatized is not None]
+        if not lemmatized:
+            return []
+
+        automaton = self.build_automaton(lemmatized)
 
         term_entry_map = self._build_term_entry_map()
         found = self.find_glossary_entries_in_text(
