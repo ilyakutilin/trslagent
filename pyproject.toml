@@ -28,3 +28,8 @@ package = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
+
+[dependency-groups]
+dev = [
+    "pyright>=1.1.410",
+]

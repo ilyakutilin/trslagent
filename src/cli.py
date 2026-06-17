@@ -39,6 +39,7 @@ def cli() -> None:
 
     if match_glossary:
         result = export_glossary_matches(cfg=settings)
+        assert match_output_path is not None
         with open(match_output_path, "w", encoding="utf-8") as f:
             f.write(result)
         return

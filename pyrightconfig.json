@@ -1,0 +1,11 @@
+{
+  "include": ["src"],
+  "exclude": ["**/__pycache__", "**/*.pyc"],
+  "typeCheckingMode": "standard",
+  "reportMissingTypeStubs": false,
+  "reportMissingImports": true,
+  "reportUnknownMemberType": false,
+  "reportUnusedImport": "warning",
+  "reportUnusedVariable": "warning",
+  "reportUnusedCallResult": false
+}

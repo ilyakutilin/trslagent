@@ -1,3 +1,6 @@
+import sys
+from pathlib import Path
+
 from tqdm import tqdm
 
 from src.config import get_settings
@@ -27,18 +30,30 @@ def _flatten_terms(entries: list[GlossaryEntry]) -> list[Term]:
     return terms
 
 
-settings = get_settings()
-lemmatizer = Lemmatizer()
-main_glossary_entries = MainGlossaryParser(
-    dir_path=settings.glossary.xml_dir_path,
-    lemmatizer=lemmatizer,
-).parse()
-terms = _flatten_terms(main_glossary_entries)
-capitalized_words: set[str] = set()
-for term in tqdm(terms):
-    if is_abbreviation(term.value):
-        capitalized_words.add(f"{term.value}\n")
-sorted_words = sorted(list(capitalized_words))
+def main() -> None:
+    if len(sys.argv) != 2:
+        sys.exit(f"Usage: python {sys.argv[0]} <path/to/config.toml>")
 
-with open("files/abbrs", mode="w", encoding="utf-8") as f:
-    f.writelines(sorted_words)
+    toml_path = Path(sys.argv[1]).resolve()
+    if not toml_path.is_file():
+        sys.exit(f"Config file not found: {toml_path}")
+
+    settings = get_settings(toml_path=toml_path)
+    lemmatizer = Lemmatizer()
+    main_glossary_entries = MainGlossaryParser(
+        dir_path=settings.glossary.xml_dir_path,
+        lemmatizer=lemmatizer,
+    ).parse()
+    terms = _flatten_terms(main_glossary_entries)
+    capitalized_words: set[str] = set()
+    for term in tqdm(terms):
+        if is_abbreviation(term.value):
+            capitalized_words.add(f"{term.value}\n")
+    sorted_words = sorted(list(capitalized_words))
+
+    with open("files/abbrs", mode="w", encoding="utf-8") as f:
+        f.writelines(sorted_words)
+
+
+if __name__ == "__main__":
+    main()

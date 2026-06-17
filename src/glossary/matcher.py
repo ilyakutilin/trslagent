@@ -204,7 +204,7 @@ def example(lang: str) -> None:
     for me in matched_entries:
         print(
             # TODO: Fix glossary entry stringifying in matcher example
-            me.to_string(
+            me.stringify(
                 source_lang=Lang(lang), target_lang=Lang("ru" if lang == "en" else "en")
             )
         )
