@@ -204,7 +204,7 @@ class InputData(BaseModel):
             try:
                 self.source_text = read_str_from_file(fp=self.source_file_path)
             except (IOError, OSError, UnicodeDecodeError) as e:
-                raise ValueError(f"Failed to read {self.target_file_path}: {e}")
+                raise ValueError(f"Failed to read {self.source_file_path}: {e}")
 
         if self.target_text is None and self.target_file_path is not None:
             try:

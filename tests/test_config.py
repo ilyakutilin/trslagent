@@ -1,3 +1,4 @@
+import datetime
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,13 @@ from src.config import (
     get_settings,
     parse_lang,
 )
+
+
+@pytest.fixture
+def reset_toml_path():
+    original = Settings._toml_path
+    yield
+    Settings._toml_path = original
 
 
 class TestParseLang:
@@ -109,24 +117,43 @@ class TestInputData:
         assert data.user_glossary_lines == ["term = translation\n",
                                              "another = другой\n"]
 
-    def test_raises_on_missing_source_file_path(self):
-        with pytest.raises(ValueError):
-            InputData(
+    def test_user_glossary_lines_none_by_default(self, tmp_path):
+        fp = tmp_path / "source.txt"
+        fp.write_text("source")
+        data = InputData(
             source_lang=Lang("en"), target_lang=Lang("ru"),
-                source_file_path=Path("/nonexistent/path.txt"),
+            source_file_path=fp,
+        )
+        assert data.user_glossary_lines is None
+
+    def test_raises_on_missing_source_file_path(self):
+        bad_path = Path("/nonexistent/path.txt")
+        with pytest.raises(ValueError, match=r"Failed to read .*nonexistent"):
+            InputData(
+                source_lang=Lang("en"), target_lang=Lang("ru"),
+                source_file_path=bad_path,
             )
 
 
 class TestOutputData:
+    FROZEN_NOW = datetime.datetime(2025, 1, 15, 12, 30, 45)
+
+    @pytest.fixture(autouse=True)
+    def freeze_time(self, monkeypatch):
+        class frozen_datetime(datetime.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return TestOutputData.FROZEN_NOW
+
+        monkeypatch.setattr("src.config.datetime", frozen_datetime)
+
     def test_get_result_file_path_with_timestamps(self):
         od = OutputData(
             result_file_path=Path("files/result.md"),
             timestamped_result_filenames=True,
         )
         result = od.get_result_file_path()
-        stem = result.stem
-        assert stem.startswith("result_")
-        assert len(stem) > len("result_")
+        assert result == Path("files/result_2025-01-15_12-30-45.md")
 
     def test_get_result_file_path_without_timestamps(self):
         od = OutputData(
@@ -161,7 +188,7 @@ class TestTomlConfigSource:
 
 
 class TestGetSettings:
-    def test_integration_with_temp_toml(self, tmp_path):
+    def test_integration_with_temp_toml(self, tmp_path, reset_toml_path):
         source_fp = tmp_path / "source.txt"
         source_fp.write_text("dummy")
         toml_path = tmp_path / "config.toml"
@@ -173,11 +200,7 @@ class TestGetSettings:
             'target_lang = "ru"\n'
             f'source_file_path = "{source_fp}"\n'
         )
-        original = Settings._toml_path
-        try:
-            settings = get_settings(toml_path)
-            assert settings.chunk.size == 9999
-            assert settings.llm.model == "my-model"
-            assert settings.log.level == "INFO"
-        finally:
-            Settings._toml_path = original
+        settings = get_settings(toml_path)
+        assert settings.chunk.size == 9999
+        assert settings.llm.model == "my-model"
+        assert settings.log.level == "INFO"
