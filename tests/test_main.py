@@ -4,7 +4,14 @@ import pytest
 from iso639 import Lang
 from pydantic import SecretStr
 
-from src.config import ChunkSettings, CostSettings, InputData, LLMSettings, OutputData, Settings
+from src.config import (
+    ChunkSettings,
+    CostSettings,
+    InputData,
+    LLMSettings,
+    OutputData,
+    Settings,
+)
 from src.glossary.models import GlossaryEntry, Term
 from src.main import (
     _deduplicate_entries,
@@ -35,10 +42,12 @@ def _make_entry(
 ) -> GlossaryEntry:
     return GlossaryEntry(
         id=entry_id,
-        terms=frozenset([
-            _make_term("en", en_value, en_lemma),
-            _make_term("ru", ru_value, ru_lemma),
-        ]),
+        terms=frozenset(
+            [
+                _make_term("en", en_value, en_lemma),
+                _make_term("ru", ru_value, ru_lemma),
+            ]
+        ),
     )
 
 
@@ -46,7 +55,13 @@ class TestStringifyGlossary:
     def test_matching_langs(self, en_lang: Lang, ru_lang: Lang):
         entries = [
             _make_entry(1, "flow meter", "расходомер", "flow meter", "расходомер"),
-            _make_entry(2, "pressure valve", "клапан давления", "pressure valve", "клапан давления"),
+            _make_entry(
+                2,
+                "pressure valve",
+                "клапан давления",
+                "pressure valve",
+                "клапан давления",
+            ),
         ]
         result = _stringify_glossary(entries, en_lang, ru_lang)
         assert "flow meter = расходомер" in result
@@ -56,10 +71,12 @@ class TestStringifyGlossary:
     def test_mismatched_langs_skipped(self, en_lang: Lang, ru_lang: Lang):
         entry = GlossaryEntry(
             id=1,
-            terms=frozenset([
-                _make_term("en", "hello"),
-                _make_term("fr", "bonjour"),
-            ]),
+            terms=frozenset(
+                [
+                    _make_term("en", "hello"),
+                    _make_term("fr", "bonjour"),
+                ]
+            ),
         )
         result = _stringify_glossary([entry], en_lang, ru_lang)
         assert result == ""
@@ -67,21 +84,58 @@ class TestStringifyGlossary:
     def test_empty_list(self, en_lang: Lang, ru_lang: Lang):
         assert _stringify_glossary([], en_lang, ru_lang) == ""
 
+    def test_multi_term_synonyms(self, en_lang: Lang, ru_lang: Lang):
+        entry = GlossaryEntry(
+            id=1,
+            terms=frozenset(
+                [
+                    _make_term("en", "pressure valve"),
+                    _make_term("en", "relief valve"),
+                    _make_term("ru", "клапан давления"),
+                    _make_term("ru", "предохранительный клапан"),
+                ]
+            ),
+        )
+        result = _stringify_glossary([entry], en_lang, ru_lang)
+        assert "pressure valve" in result
+        assert "relief valve" in result
+        assert "клапан давления" in result
+        assert "предохранительный клапан" in result
+        assert " = " in result
+        left, right = result.split(" = ", 1)
+        assert all(t in left.split(" | ") for t in ("pressure valve", "relief valve"))
+        assert all(
+            t in right.split(" | ")
+            for t in ("клапан давления", "предохранительный клапан")
+        )
+
 
 class TestDeduplicateEntries:
     def test_user_overrides_matched_auto(self, en_lang: Lang):
-        user_entry = _make_entry(10, "flow meter", "расходомер", "flow meter", "расходомер")
-        auto_entry = _make_entry(1, "flow meter", "расходомер", "flow meter", "расходомер")
+        user_entry = _make_entry(
+            10, "flow meter", "расходомер", "flow meter", "расходомер"
+        )
+        auto_entry = _make_entry(
+            1, "flow meter", "расходомер", "flow meter", "расходомер"
+        )
 
-        user_entries, auto_entries = _deduplicate_entries([auto_entry], [user_entry], en_lang)
+        user_entries, auto_entries = _deduplicate_entries(
+            [auto_entry], [user_entry], en_lang
+        )
         assert len(user_entries) == 1
         assert len(auto_entries) == 0
 
     def test_no_overlap(self, en_lang: Lang):
-        user_entry = _make_entry(10, "flow meter", "расходомер", "flow meter", "расходомер")
-        auto_entry = _make_entry(1, "pressure valve", "клапан давления", "pressure valve", "клапан давления")
+        user_entry = _make_entry(
+            10, "flow meter", "расходомер", "flow meter", "расходомер"
+        )
+        auto_entry = _make_entry(
+            1, "pressure valve", "клапан давления", "pressure valve", "клапан давления"
+        )
 
-        user_entries, auto_entries = _deduplicate_entries([auto_entry], [user_entry], en_lang)
+        user_entries, auto_entries = _deduplicate_entries(
+            [auto_entry], [user_entry], en_lang
+        )
         assert len(user_entries) == 1
         assert len(auto_entries) == 1
 
@@ -89,6 +143,16 @@ class TestDeduplicateEntries:
         user_entries, auto_entries = _deduplicate_entries([], [], en_lang)
         assert user_entries == []
         assert auto_entries == []
+
+    def test_different_values_same_lemma(self, en_lang: Lang):
+        user_entry = _make_entry(10, "color", "цвет", "color", "цвет")
+        auto_entry = _make_entry(1, "colour", "цвет", "color", "цвет")
+
+        user_entries, auto_entries = _deduplicate_entries(
+            [auto_entry], [user_entry], en_lang
+        )
+        assert len(user_entries) == 1
+        assert len(auto_entries) == 0
 
 
 class TestTranslationPipeline:
@@ -117,7 +181,9 @@ class TestTranslationPipeline:
 
     @pytest.mark.asyncio
     async def test_with_user_glossary_no_auto(self, mocker):
-        user_entries = [_make_entry(10, "flow meter", "расходомер", "flow meter", "расходомер")]
+        user_entries = [
+            _make_entry(10, "flow meter", "расходомер", "flow meter", "расходомер")
+        ]
         mocker.patch("src.main._parse_glossaries", return_value=([], user_entries))
         mocker.patch("src.main.fetch_cost")
 
@@ -291,24 +357,44 @@ class TestChunkFailure:
 
         result = await main(cfg)
         assert result is not None
+        success_count = result.count("Chunk")
         assert "Chunk 1 OK" in result
         assert "Chunk 3 OK" in result
         assert "Chunk 2" not in result
+        assert success_count == 2
 
 
 class TestExportGlossaryMatches:
-    def test_text_matched_against_auto_glossary(self, mocker, en_lang: Lang, ru_lang: Lang):
-        user_entries = [_make_entry(10, "flow meter", "расходомер", "flow meter", "расходомер")]
+    def test_text_matched_against_auto_glossary(
+        self, mocker, en_lang: Lang, ru_lang: Lang
+    ):
+        user_entries = [
+            _make_entry(10, "flow meter", "расходомер", "flow meter", "расходомер")
+        ]
         auto_entries = [
-            _make_entry(1, "pressure valve", "клапан давления", "pressure valve", "клапан давления"),
+            _make_entry(
+                1,
+                "pressure valve",
+                "клапан давления",
+                "pressure valve",
+                "клапан давления",
+            ),
         ]
         matched_entries = [
-            _make_entry(1, "pressure valve", "клапан давления", "pressure valve", "клапан давления"),
+            _make_entry(
+                1,
+                "pressure valve",
+                "клапан давления",
+                "pressure valve",
+                "клапан давления",
+            ),
         ]
 
         mock_lemmatizer = mocker.MagicMock()
         mocker.patch("src.main.Lemmatizer", return_value=mock_lemmatizer)
-        mocker.patch("src.main._parse_glossaries", return_value=(auto_entries, user_entries))
+        mocker.patch(
+            "src.main._parse_glossaries", return_value=(auto_entries, user_entries)
+        )
 
         mock_matcher = mocker.patch("src.main.TermMatcher")
         mock_matcher_instance = mock_matcher.return_value
@@ -327,7 +413,6 @@ class TestExportGlossaryMatches:
         assert "flow meter = расходомер" in result
 
     def test_no_auto_glossary(self, mocker):
-        mocker.patch("src.main.Lemmatizer")
         mocker.patch("src.main._parse_glossaries", return_value=([], []))
 
         cfg = Settings(
@@ -345,7 +430,7 @@ class TestExportGlossaryMatches:
 class TestResolveAndLogCost:
     @pytest.mark.asyncio
     async def test_known_costs(self, mocker):
-        mocker.patch("src.main.fetch_cost", side_effect=[1.50, 2.50])
+        mock_fetch = mocker.patch("src.main.fetch_cost", side_effect=[1.50, 2.50])
 
         cfg = Settings(
             input_data=InputData(
@@ -357,10 +442,13 @@ class TestResolveAndLogCost:
         )
 
         await _resolve_and_log_cost(["id-1", "id-2"], "test-key", cfg)
+        assert mock_fetch.call_count == 2
+        mock_fetch.assert_any_call("id-1", "test-key", cfg.cost)
+        mock_fetch.assert_any_call("id-2", "test-key", cfg.cost)
 
     @pytest.mark.asyncio
     async def test_unknown_costs(self, mocker):
-        mocker.patch("src.main.fetch_cost", side_effect=[1.50, None])
+        mock_fetch = mocker.patch("src.main.fetch_cost", side_effect=[1.50, None])
 
         cfg = Settings(
             input_data=InputData(
@@ -372,6 +460,7 @@ class TestResolveAndLogCost:
         )
 
         await _resolve_and_log_cost(["id-1", "id-2"], "test-key", cfg)
+        assert mock_fetch.call_count == 2
 
     @pytest.mark.asyncio
     async def test_no_url_configured(self, mocker):
