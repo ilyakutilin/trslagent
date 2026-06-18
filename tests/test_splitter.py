@@ -25,16 +25,32 @@ class TestSplitText:
         assert result[1].strip() == para2
 
     def test_respects_sentence_boundaries(self):
-        text = "First sentence. Second sentence. Third sentence."
-        result = split_text(text, chunk_size=20)
-        for chunk in result:
-            assert chunk.strip()
+        s1 = "First fairly long sentence."
+        s2 = "Second fairly long sentence."
+        s3 = "Third fairly long sentence."
+        text = f"{s1} {s2} {s3}"
+        chunk_size = len(s1) + len(s2) - 10
+        result = split_text(text, chunk_size=chunk_size)
+        assert len(result) == 3
         reconstructed = "".join(result)
         assert reconstructed == text
 
     def test_empty_string(self):
         result = split_text("", chunk_size=200)
         assert result == []
+
+    def test_whitespace_only_text(self):
+        result = split_text("   \n\n   ", chunk_size=200)
+        assert result == []
+
+    def test_single_character_text(self):
+        result = split_text("X", chunk_size=200)
+        assert result == ["X"]
+
+    def test_chunk_size_zero(self):
+        import pytest
+        with pytest.raises(ValueError, match="chunk_size must be > 0"):
+            split_text("Some text here", chunk_size=0)
 
 
 class TestSplitByDivider:
@@ -89,6 +105,36 @@ class TestSplitByDivider:
     def test_only_divider_lines_returns_empty_list(self):
         result = split_by_divider("\n----------\n--------------\n", "-")
         assert result == []
+
+    def test_nine_repetitions_not_treated_as_divider(self):
+        divider = "-"
+        text = "Before\n---------\nAfter"
+        result = split_by_divider(text, divider)
+        assert result == [text]
+
+    def test_dot_as_divider_re_escaped(self):
+        divider = "."
+        chunk1 = "First"
+        chunk2 = "Second"
+        text = f"{chunk1}\n..........\n{chunk2}"
+        result = split_by_divider(text, divider)
+        assert result == [chunk1, chunk2]
+
+    def test_star_as_divider_re_escaped(self):
+        divider = "*"
+        chunk1 = "First"
+        chunk2 = "Second"
+        text = f"{chunk1}\n**********\n{chunk2}"
+        result = split_by_divider(text, divider)
+        assert result == [chunk1, chunk2]
+
+    def test_plus_as_divider_re_escaped(self):
+        divider = "+"
+        chunk1 = "First"
+        chunk2 = "Second"
+        text = f"{chunk1}\n++++++++++\n{chunk2}"
+        result = split_by_divider(text, divider)
+        assert result == [chunk1, chunk2]
 
 
 class TestStitchChunks:
