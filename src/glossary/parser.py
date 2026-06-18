@@ -44,13 +44,18 @@ class GlossaryXMLParser:
     terms across different languages.
     """
 
-    def __init__(self, file_path: Path) -> None:
+    def __init__(self, file_path: Path | None = None) -> None:
         """Initialize the GlossaryXMLParser.
 
         Args:
-            file_path: Path to the XML file to parse.
+            file_path: Path to the XML file to parse. Optional for unit testing.
         """
         self.file_path = file_path
+
+    def _require_file_path(self) -> Path:
+        if self.file_path is None:
+            raise ValueError("file_path must not be None for this operation")
+        return self.file_path
 
     def _get_xml_root(self) -> ElementTree.Element:
         """Parse and validate the XML file, returning the root element.
@@ -63,7 +68,7 @@ class GlossaryXMLParser:
             ValueError: If the XML is malformed or has unexpected root tag.
             RuntimeError: If the file cannot be read.
         """
-        fp = self.file_path
+        fp = self._require_file_path()
 
         logger.info(f"Loading glossary terms from XML: {fp}")
 
@@ -191,7 +196,7 @@ class GlossaryXMLParser:
         Returns:
             A list of GlossaryEntry objects extracted from the XML.
         """
-        fp = self.file_path
+        fp = self._require_file_path()
 
         concept_groups = xml_root.findall("conceptGrp")
         if not concept_groups:
@@ -261,7 +266,7 @@ class GlossaryXMLParser:
         Raises:
             ValueError: If no entries are parsed from the file.
         """
-        logger.info(f"Parsing {self.file_path.name}...")
+        logger.info(f"Parsing {self._require_file_path().name}...")
         root = self._get_xml_root()
 
         glossary_entries = self._get_glossary_entries(root)
