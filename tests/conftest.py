@@ -4,6 +4,14 @@ import pytest
 from iso639 import Lang
 
 
+@pytest.fixture(autouse=True)
+def _suppress_loguru():
+    from loguru import logger
+
+    logger.remove()
+    logger.add(lambda _: None, level="ERROR")
+
+
 @pytest.fixture(scope="session")
 def en_lang() -> Lang:
     return Lang("en")

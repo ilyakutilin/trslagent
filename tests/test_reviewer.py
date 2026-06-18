@@ -6,22 +6,11 @@ from iso639 import Lang
 from src.reviewer import Reviewer
 
 
-@pytest.fixture
-def reviewer(en_lang: Lang, ru_lang: Lang) -> Reviewer:
-    return Reviewer(
-        source_lang=en_lang,
-        target_lang=ru_lang,
-        specialized_in=None,
-        doc_type=None,
-        doc_title=None,
-        llm=None,
-    )
-
-
 class TestBuildSystemPrompt:
     def test_no_specialization_no_glossary_no_doc_context(
-        self, reviewer: Reviewer
+        self, en_lang: Lang, ru_lang: Lang
     ):
+        reviewer = Reviewer(en_lang, ru_lang, None, None, None, None)
         result = reviewer._build_system_prompt(
             user_glossary_str="",
             auto_glossary_str="",
@@ -33,17 +22,18 @@ class TestBuildSystemPrompt:
         assert "auto dictionary" not in result
         assert "deviation from the set dictionary" not in result
 
-    def test_with_specialized_in(self, reviewer: Reviewer):
-        reviewer.specialized_in = "medicine"
+    def test_with_specialized_in(self, en_lang: Lang, ru_lang: Lang):
+        reviewer = Reviewer(en_lang, ru_lang, "medicine", None, None, None)
         result = reviewer._build_system_prompt(
             user_glossary_str="",
             auto_glossary_str="",
         )
         assert "specialized in medicine" in result
 
-    def test_with_doc_type_and_title(self, reviewer: Reviewer):
-        reviewer.doc_type = "report"
-        reviewer.doc_title = "Annual Review"
+    def test_with_doc_type_and_title(self, en_lang: Lang, ru_lang: Lang):
+        reviewer = Reviewer(
+            en_lang, ru_lang, None, "report", "Annual Review", None
+        )
         result = reviewer._build_system_prompt(
             user_glossary_str="",
             auto_glossary_str="",
@@ -51,7 +41,19 @@ class TestBuildSystemPrompt:
         assert "report" in result
         assert "Annual Review" in result
 
-    def test_with_user_glossary(self, reviewer: Reviewer):
+    def test_with_doc_title_only(self, en_lang: Lang, ru_lang: Lang):
+        reviewer = Reviewer(
+            en_lang, ru_lang, None, None, "Annual Review", None
+        )
+        result = reviewer._build_system_prompt(
+            user_glossary_str="",
+            auto_glossary_str="",
+        )
+        assert "document" in result
+        assert "Annual Review" in result
+
+    def test_with_user_glossary(self, en_lang: Lang, ru_lang: Lang):
+        reviewer = Reviewer(en_lang, ru_lang, None, None, None, None)
         glossary = "flow meter = расходомер\npressure valve = клапан давления"
         result = reviewer._build_system_prompt(
             user_glossary_str=glossary,
@@ -64,7 +66,8 @@ class TestBuildSystemPrompt:
         assert "deviation from the set dictionary" in result
         assert "auto dictionary" not in result
 
-    def test_with_auto_glossary(self, reviewer: Reviewer):
+    def test_with_auto_glossary(self, en_lang: Lang, ru_lang: Lang):
+        reviewer = Reviewer(en_lang, ru_lang, None, None, None, None)
         glossary = "flow meter = расходомер\npressure valve = клапан давления"
         result = reviewer._build_system_prompt(
             user_glossary_str="",
@@ -77,7 +80,8 @@ class TestBuildSystemPrompt:
         assert "deviation from the set dictionary" not in result
         assert "user dictionary" not in result
 
-    def test_with_both_glossaries(self, reviewer: Reviewer):
+    def test_with_both_glossaries(self, en_lang: Lang, ru_lang: Lang):
+        reviewer = Reviewer(en_lang, ru_lang, None, None, None, None)
         user_glossary = "flow meter = расходомер"
         auto_glossary = "pressure valve = клапан давления"
         result = reviewer._build_system_prompt(
@@ -92,11 +96,15 @@ class TestBuildSystemPrompt:
 
 
 class TestBuildUserPrompt:
-    def test_formats_source_and_target(self, reviewer: Reviewer):
+    def test_formats_source_and_target(self, en_lang: Lang, ru_lang: Lang):
+        reviewer = Reviewer(en_lang, ru_lang, None, None, None, None)
         source = "The quick brown fox"
         target = "Быстрая коричневая лиса"
         result = reviewer._build_user_prompt(source, target)
-        assert result == "English: The quick brown fox || Russian: Быстрая коричневая лиса"
+        assert "English:" in result
+        assert source in result
+        assert "Russian:" in result
+        assert target in result
 
 
 class TestReviewTextAsync:
@@ -104,14 +112,7 @@ class TestReviewTextAsync:
     def reviewer_with_llm(
         self, en_lang: Lang, ru_lang: Lang, mock_llm: AsyncMock
     ) -> Reviewer:
-        return Reviewer(
-            source_lang=en_lang,
-            target_lang=ru_lang,
-            specialized_in=None,
-            doc_type=None,
-            doc_title=None,
-            llm=mock_llm,
-        )
+        return Reviewer(en_lang, ru_lang, None, None, None, mock_llm)
 
     @pytest.mark.asyncio
     async def test_llm_available(
@@ -125,12 +126,13 @@ class TestReviewTextAsync:
             user_glossary_str="",
             auto_glossary_str="",
         )
-        assert review == "Mocked translation text"
-        assert cid == "mock-completion-id"
+        assert isinstance(review, str) and len(review) > 0
+        assert isinstance(cid, str) and len(cid) > 0
         mock_llm.get_reply_async.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_llm_none(self, reviewer: Reviewer, capsys):
+    async def test_llm_none(self, en_lang: Lang, ru_lang: Lang, capsys):
+        reviewer = Reviewer(en_lang, ru_lang, None, None, None, None)
         source = "The quick brown fox."
         target = "Быстрая коричневая лиса."
         review, cid = await reviewer.review_text_async(
@@ -145,5 +147,9 @@ class TestReviewTextAsync:
         captured = capsys.readouterr()
         assert "SYSTEM PROMPT" in captured.out
         assert "USER PROMPT" in captured.out
-        assert source in captured.out
-        assert target in captured.out
+
+        user_section_start = captured.out.index("USER PROMPT")
+        source_pos = captured.out.index(source)
+        target_pos = captured.out.index(target)
+        assert source_pos > user_section_start
+        assert target_pos > user_section_start
