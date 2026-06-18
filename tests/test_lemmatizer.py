@@ -54,14 +54,14 @@ class TestParseKnownAbbrs:
 
 
 class TestLemmatizeEnglish:
-    @pytest.mark.spacy
+    @pytest.mark.nlp
     def test_lemmatizes_english_text(self, lemmatizer):
         result = lemmatizer.lemmatize(
             "The foxes were jumping over the lazy dogs", Lang("en")
         )
         assert result == ["the", "fox", "be", "jump", "over", "the", "lazy", "dog"]
 
-    @pytest.mark.spacy
+    @pytest.mark.nlp
     def test_preserves_known_abbreviation(self, lemmatizer_with_abbrs):
         result = lemmatizer_with_abbrs.lemmatize(
             "NASA launched a rocket yesterday", Lang("en")
@@ -69,39 +69,39 @@ class TestLemmatizeEnglish:
         assert result is not None
         assert result == ["NASA", "launch", "a", "rocket", "yesterday"]
 
-    @pytest.mark.spacy
+    @pytest.mark.nlp
     def test_replaces_hyphens_with_spaces(self, lemmatizer):
         result = lemmatizer.lemmatize("the flow-meter is calibrated", Lang("en"))
         assert result == ["the", "flow", "meter", "be", "calibrate"]
 
-    @pytest.mark.spacy
+    @pytest.mark.nlp
     def test_replaces_en_dash_with_spaces(self, lemmatizer):
         result = lemmatizer.lemmatize("the flow\u2013meter is calibrated", Lang("en"))
         assert result == ["the", "flow", "meter", "be", "calibrate"]
 
-    @pytest.mark.spacy
+    @pytest.mark.nlp
     def test_empty_string_returns_empty_list(self, lemmatizer):
         result = lemmatizer.lemmatize("", Lang("en"))
         assert result == []
 
-    @pytest.mark.spacy
+    @pytest.mark.nlp
     def test_abbreviations_only_input(self, lemmatizer_with_abbrs):
         result = lemmatizer_with_abbrs.lemmatize("NASA", Lang("en"))
         assert result == ["NASA"]
 
-    @pytest.mark.spacy
+    @pytest.mark.nlp
     def test_case_sensitive_abbreviation_matching(self, lemmatizer_with_abbrs):
         result = lemmatizer_with_abbrs.lemmatize("Nasa launched a rocket", Lang("en"))
         assert result[0] != "Nasa"
 
 
 class TestLemmatizeRussian:
-    @pytest.mark.pymorphy3
+    @pytest.mark.nlp
     def test_lemmatizes_russian_text(self, lemmatizer):
         result = lemmatizer.lemmatize("бегущие лисы прыгали", Lang("ru"))
         assert result == ["бежать", "лис", "прыгать"]
 
-    @pytest.mark.pymorphy3
+    @pytest.mark.nlp
     def test_preserves_known_abbreviation(self, lemmatizer_with_abbrs):
         result = lemmatizer_with_abbrs.lemmatize(
             "ГОСТ требует проверки", Lang("ru")
@@ -109,17 +109,17 @@ class TestLemmatizeRussian:
         assert result is not None
         assert result == ["ГОСТ", "требовать", "проверка"]
 
-    @pytest.mark.pymorphy3
+    @pytest.mark.nlp
     def test_empty_string_returns_empty_list(self, lemmatizer):
         result = lemmatizer.lemmatize("", Lang("ru"))
         assert result == []
 
-    @pytest.mark.pymorphy3
+    @pytest.mark.nlp
     def test_abbreviations_only_input(self, lemmatizer_with_abbrs):
         result = lemmatizer_with_abbrs.lemmatize("ГОСТ", Lang("ru"))
         assert result == ["ГОСТ"]
 
-    @pytest.mark.pymorphy3
+    @pytest.mark.nlp
     def test_mixed_script_russian(self, lemmatizer):
         result = lemmatizer.lemmatize("проверка HTTP запроса", Lang("ru"))
         assert len(result) == 3

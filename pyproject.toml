@@ -30,8 +30,7 @@ asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 addopts = "-v --tb=short"
 markers = [
-    "spacy: tests that require the en_core_web_sm spaCy model (skip with '-m \"not spacy\"')",
-    "pymorphy3: tests that require pymorphy3 (skip with '-m \"not pymorphy3\"')",
+    "nlp: tests that require NLP models (spaCy en_core_web_sm or pymorphy3) (skip with '-m \"not nlp\"')",
     "slow: tests that are slow to execute",
 ]
 
