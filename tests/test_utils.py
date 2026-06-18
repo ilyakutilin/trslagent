@@ -62,7 +62,7 @@ class TestValidateFile:
     def test_readable_file_passes(self, tmp_path):
         fp = tmp_path / "good.txt"
         fp.write_text("some content")
-        validate_file(fp)
+        assert validate_file(fp) is None
 
     def test_nonexistent_raises(self, tmp_path):
         fp = tmp_path / "missing.txt"
