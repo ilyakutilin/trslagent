@@ -80,7 +80,16 @@ class TestBuildSystemPrompt:
             user_glossary_str="",
             auto_glossary_str="",
         )
-        assert "extract" not in result
+        assert "an extract from" not in result
+
+    def test_is_extract_true_no_doc_context(self, translator: Translator):
+        result = translator._build_system_prompt(
+            is_extract=True,
+            user_glossary_str="",
+            auto_glossary_str="",
+        )
+        assert "an extract from" not in result
+        assert "The text for translation is" not in result
 
     def test_with_user_glossary(self, translator: Translator):
         glossary = "flow meter = расходомер\npressure valve = клапан давления"
@@ -118,6 +127,7 @@ class TestBuildSystemPrompt:
         )
         assert "user dictionary" in result
         assert "auto dictionary" in result
+        assert result.index("user dictionary") < result.index("auto dictionary")
         assert "flow meter" in result
         assert "pressure valve" in result
 
@@ -155,6 +165,12 @@ class TestTranslateChunkAsync:
         assert translated == "Mocked translation text"
         assert cid == "mock-completion-id"
         mock_llm.get_reply_async.assert_called_once()
+        call_kwargs = mock_llm.get_reply_async.call_args.kwargs
+        assert "professional experienced translator" in call_kwargs["system_prompt"]
+        assert "English" in call_kwargs["system_prompt"]
+        assert "Russian" in call_kwargs["system_prompt"]
+        assert call_kwargs["user_prompt"].startswith("Text for translation:\n")
+        assert sample_text in call_kwargs["user_prompt"]
 
     @pytest.mark.asyncio
     async def test_llm_none(self, translator: Translator, sample_text: str, capsys):
@@ -169,5 +185,37 @@ class TestTranslateChunkAsync:
 
         captured = capsys.readouterr()
         assert "SYSTEM PROMPT" in captured.out
+        assert "You are a professional experienced translator" in captured.out
+        assert "from English into Russian" in captured.out
         assert "USER PROMPT" in captured.out
-        assert sample_text in captured.out
+        assert captured.out.index("SYSTEM PROMPT") < captured.out.index("USER PROMPT")
+        assert f"Text for translation:\n{sample_text}" in captured.out
+
+    @pytest.mark.asyncio
+    async def test_with_glossary_passed_to_llm(self, translator_with_llm: Translator, sample_text: str, mock_llm: AsyncMock):
+        user_glossary = "flow meter = расходомер"
+        auto_glossary = "pressure valve = клапан давления"
+        await translator_with_llm.translate_chunk_async(
+            chunk=sample_text,
+            user_glossary_str=user_glossary,
+            auto_glossary_str=auto_glossary,
+            is_extract=False,
+        )
+        call_kwargs = mock_llm.get_reply_async.call_args.kwargs
+        assert "user dictionary" in call_kwargs["system_prompt"]
+        assert "auto dictionary" in call_kwargs["system_prompt"]
+        assert "flow meter" in call_kwargs["system_prompt"]
+        assert "pressure valve" in call_kwargs["system_prompt"]
+
+    @pytest.mark.asyncio
+    async def test_is_extract_passed_to_llm(self, translator_with_llm: Translator, sample_text: str, mock_llm: AsyncMock):
+        translator_with_llm.doc_type = "report"
+        translator_with_llm.doc_title = "Test Doc"
+        await translator_with_llm.translate_chunk_async(
+            chunk=sample_text,
+            user_glossary_str="",
+            auto_glossary_str="",
+            is_extract=True,
+        )
+        call_kwargs = mock_llm.get_reply_async.call_args.kwargs
+        assert "an extract from" in call_kwargs["system_prompt"]
