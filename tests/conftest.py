@@ -1,4 +1,3 @@
-from pathlib import Path
 from unittest.mock import AsyncMock
 
 import pytest
@@ -16,20 +15,7 @@ def ru_lang() -> Lang:
 
 
 @pytest.fixture(scope="session")
-def project_root() -> Path:
-    return Path(__file__).parent.parent
-
-
-@pytest.fixture
 def sample_text() -> str:
-    return (
-        "The quick brown fox jumps over the lazy dog. "
-        "This is a second sentence about nothing in particular."
-    )
-
-
-@pytest.fixture
-def sample_text_long() -> str:
     return (
         "Section 1: Introduction.\n\n"
         "This document describes the system architecture in detail. "
@@ -41,7 +27,7 @@ def sample_text_long() -> str:
     )
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def sample_xml_glossary() -> str:
     return """<?xml version="1.0" encoding="UTF-8"?>
 <mtf>
@@ -81,17 +67,10 @@ def sample_xml_glossary() -> str:
 
 
 @pytest.fixture
-def sample_user_glossary_lines() -> list[str]:
-    return [
-        "flow meter = расходомер",
-        "pressure valve = клапан давления",
-        "# this is a comment",
-        "actuator;drive = привод;исполнительный механизм",
-    ]
-
-
-@pytest.fixture
 def mock_llm() -> AsyncMock:
     mock = AsyncMock()
-    mock.get_reply_async.return_value = ("Mocked translation text", "mock-completion-id")
+    mock.get_reply_async.return_value = (
+        "Mocked translation text",
+        "mock-completion-id",
+    )
     return mock
