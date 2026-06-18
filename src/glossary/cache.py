@@ -42,7 +42,8 @@ class GlossaryCache:
             return cached_entries
 
         except Exception as exc:  # noqa: BLE001
-            logger.warning(f"Cache read failed ({exc})")
+            logger.warning(f"Cache read failed ({exc}), removing corrupt file")
+            self.cache_file.unlink(missing_ok=True)
 
         return empty_cache
 
@@ -59,8 +60,4 @@ class GlossaryCache:
 
     def _get_cache_file_path(self, cache_dir: Path) -> Path:
         cache_dir.mkdir(parents=True, exist_ok=True)
-
-        if not cache_dir.is_dir():
-            raise NotADirectoryError(f"Cache dir is not a directory: {cache_dir}")
-
         return cache_dir / f"{self.glossary_file.glossary_name}.pickle"

@@ -38,9 +38,8 @@ class TestGlossaryCache:
         cache_dir = tmp_path / "cache"
         cache = GlossaryCache(gf, cache_dir)
 
-        cache_file = cache_dir / f"{gf.glossary_name}.pickle"
         payload = {"hash": gf.hash, "entries": [entry]}
-        with cache_file.open("wb") as f:
+        with cache.cache_file.open("wb") as f:
             pickle.dump(payload, f)
 
         result = cache.get_cache()
@@ -55,14 +54,18 @@ class TestGlossaryCache:
         cache_dir = tmp_path / "cache"
         cache = GlossaryCache(gf, cache_dir)
 
-        cache_file = cache_dir / f"{gf.glossary_name}.pickle"
         payload = {"hash": "wronghash", "entries": [entry]}
-        with cache_file.open("wb") as f:
+        with cache.cache_file.open("wb") as f:
             pickle.dump(payload, f)
 
         result = cache.get_cache()
         assert result.are_up_to_date is False
         assert result.entries == [entry]
+
+        cache.write_cache(result.entries)
+        reloaded = cache.get_cache()
+        assert reloaded.are_up_to_date is True
+        assert reloaded.entries == [entry]
 
     def test_get_cache_corrupt_pickle(self, tmp_path):
         xml = _make_xml_file(tmp_path, "test.xml")
@@ -71,12 +74,12 @@ class TestGlossaryCache:
         cache_dir = tmp_path / "cache"
         cache = GlossaryCache(gf, cache_dir)
 
-        cache_file = cache_dir / f"{gf.glossary_name}.pickle"
-        cache_file.write_bytes(b"not a valid pickle")
+        cache.cache_file.write_bytes(b"not a valid pickle")
 
         result = cache.get_cache()
         assert result.are_up_to_date is False
         assert result.entries == []
+        assert not cache.cache_file.exists()
 
     def test_write_cache_then_read_back(self, tmp_path):
         xml = _make_xml_file(tmp_path, "test.xml")
@@ -124,3 +127,13 @@ class TestGlossaryCache:
 
         with pytest.raises(FileExistsError):
             GlossaryCache(gf, cache_dir)
+
+    def test_get_cache_file_path_raises_on_broken_symlink(self, tmp_path):
+        target = tmp_path / "missing_target"
+        symlink = tmp_path / "broken_link"
+        symlink.symlink_to(target)
+        xml = _make_xml_file(tmp_path, "test.xml")
+        gf = GlossaryFile(str(xml))
+
+        with pytest.raises(FileExistsError):
+            GlossaryCache(gf, symlink)
