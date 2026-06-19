@@ -144,6 +144,10 @@ class EmailSettings(BaseModel):
         default=True,
         description="When true, only senders in allowed_senders may submit requests",
     )
+    allowed_recipient: str | None = Field(
+        default=None,
+        description="If set, only webhooks for emails sent to this exact address are processed; others are logged and silently ignored",
+    )
     default_config_path: Path = Field(
         default=Path("files/email_default_config.toml"),
         description="Default TOML config used when no config.toml attachment is provided",

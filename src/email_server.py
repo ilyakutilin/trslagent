@@ -16,7 +16,6 @@ from src.email_processor import (
 )
 from src.main import main
 
-
 SIGNATURE_TOLERANCE = 300  # 5 minutes
 
 
@@ -82,7 +81,9 @@ async def _handle_webhook(request: web.Request, cfg: Settings) -> web.Response:
     raw_body = await request.read()
 
     email_settings = cfg.email
-    if not _verify_svix(raw_body, dict(request.headers), email_settings.resend_webhook_secret):
+    if not _verify_svix(
+        raw_body, dict(request.headers), email_settings.resend_webhook_secret
+    ):
         return web.Response(status=401, text="Invalid signature")
 
     try:
@@ -100,6 +101,17 @@ async def _handle_webhook(request: web.Request, cfg: Settings) -> web.Response:
     sender_raw = data.get("from", "")
     subject = data.get("subject", "(no subject)")
     message_id = data.get("message_id", "")
+
+    allowed_recipient = cfg.email.allowed_recipient
+    if allowed_recipient:
+        recipients = data.get("to", [])
+        if allowed_recipient not in recipients:
+            logger.warning(
+                "Ignoring webhook for unconfigured recipient(s): {} (allowed: {})",
+                recipients,
+                allowed_recipient,
+            )
+            return web.Response(status=200, text="Ignored")
 
     if not email_id:
         return web.Response(status=200, text="Missing email_id")
