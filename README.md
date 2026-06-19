@@ -1,6 +1,6 @@
 # trslagent — AI Translation Agent
 
-Glossary-aware LLM document translation and review. Takes an `.xml` glossary (Multiterm export) or a plain-text user glossary, matches terms against source text with lemmatization and Aho-Corasick, then sends chunked text to an LLM (OpenRouter) for translation — or reviews an existing translation for critical mistakes.
+Glossary-aware LLM document translation and review. Takes an `.xml` glossary (Multiterm export) or a plain-text user glossary, matches terms against source text with lemmatization and Aho-Corasick, then sends chunked text to an LLM (OpenRouter) for translation — or reviews an existing translation for critical mistakes. Can also run as a long-lived email webhook server (Resend) that accepts translation/review requests via email attachments and replies with results.
 
 ## Architecture overview
 
@@ -13,7 +13,7 @@ Config TOML
     │                                                           │  │
     │   For each chunk:                                         │  │
     │     match glossary terms (Aho-Corasick on lemmas)  ◄──────┘  │
-    │     deduplicate (user overrides auto)                     │
+    │     deduplicate (user overrides auto)                        │
     │     build LLM prompt (system + user + dictionary)            │
     │     call OpenRouter LLM                                      │
     │                                                              │
@@ -32,6 +32,8 @@ src/
 ├── reviewer.py               # full-text review/proofread (no chunking)
 ├── splitter.py               # text → chunks → stitch
 ├── lemmatizer.py             # EN (spaCy) / RU (pymorphy3) lemmatizer
+├── email_server.py           # aiohttp webhook server (Resend → translate → reply)
+├── email_processor.py        # Resend API client (fetch/send emails, build settings)
 ├── utils.py                  # file I/O helpers
 ├── glossary/
 │   ├── parser.py             # XML & user-glossary parsers + cache logic
@@ -39,6 +41,9 @@ src/
 │   ├── matcher.py            # Aho-Corasick term matching
 │   ├── models.py             # Term, GlossaryEntry, GlossaryFile
 │   └── get_abbrs.py          # standalone abbreviation extractor
+infra/
+├── nginx.conf                # reverse-proxy config for email webhook
+├── trslagent-email.service   # systemd unit for email server
 files/
 ├── config.toml               # working config
 ├── source.txt                # sample source
@@ -88,34 +93,43 @@ result_file_path = "files/result.md"
 
 All sections and their keys:
 
-| Section       | Key                            | Default                         | Description                                         |
-| ------------- | ------------------------------ | ------------------------------- | --------------------------------------------------- |
-| `input_data`  | `source_lang`                  | `"en"`                          | ISO 639-1 code or full name                         |
-|               | `target_lang`                  | `"en"`                          | ISO 639-1 code or full name                         |
-|               | `specialized_in`               | —                               | Domain expertise for system prompt                  |
-|               | `doc_type`                     | —                               | e.g. `"letter"`, `"procedure"`                      |
-|               | `doc_title`                    | —                               | Document title for prompt context                   |
-|               | `source_file_path`             | `"files/source.txt"`            | Input text file                                     |
-|               | `target_file_path`             | —                               | Set to enable **review mode**                       |
-|               | `auto_glossary`                | `false`                         | Match auto glossary against source                  |
-|               | `user_glossary_file_path`      | —                               | Path to user glossary `.txt`                     |
-| `output_data` | `result_file_path`             | `"files/result.md"`             | Output file                                         |
-|               | `raw_result_file_path`         | `"files/raw_result.json"`       | (unused)                                            |
-|               | `print_prompt_only`            | `false`                         | Dry-run: print prompts, skip LLM                    |
-|               | `timestamped_result_filenames` | `true`                          | Append `_YYYY-MM-DD_HH-MM-SS`                       |
-| `llm`         | `base_url`                     | `https://openrouter.ai/api/v1`  |                                                     |
-|               | `api_key`                      | from `.env`                     | OpenRouter key                                      |
-|               | `model`                        | `"anthropic/claude-3.5-sonnet"` | Any OpenRouter model string                         |
-|               | `temperature`                  | —                               | `float` or unset for model default                  |
-|               | `reasoning_effort`             | —                               | `none`, `minimal`, `low`, `medium`, `high`, `xhigh` |
-| `chunk`       | `size`                         | `6000`                          | Max chunk size in characters                        |
-|               | `divider`                      | —                               | Char for manual chunking (splits on `----------` etc.) |
-|               | `max_concurrent`               | `3`                             | Max simultaneous LLM calls per task                 |
-|               | `delay_seconds`                | `1.5`                           | Seconds between launching chunk tasks               |
-| `glossary`    | `xml_dir_path`                 | `"files/glossary"`              | Dir with Multiterm `.xml` exports                   |
-|               | `known_abbrs_file_path`        | —                               | Path to abbreviations list                          |
-| `log`         | `level`                        | `"INFO"`                        | `DEBUG`/`INFO`/`WARNING`/`ERROR`/`CRITICAL`         |
-|               | `format`                       | loguru default                  | Custom log format string                            |
+| Section       | Key                            | Default                                 | Description                                            |
+| ------------- | ------------------------------ | --------------------------------------- | ------------------------------------------------------ |
+| `input_data`  | `source_lang`                  | `"en"`                                  | ISO 639-1 code or full name                            |
+|               | `target_lang`                  | `"en"`                                  | ISO 639-1 code or full name                            |
+|               | `specialized_in`               | —                                       | Domain expertise for system prompt                     |
+|               | `doc_type`                     | —                                       | e.g. `"letter"`, `"procedure"`                         |
+|               | `doc_title`                    | —                                       | Document title for prompt context                      |
+|               | `source_file_path`             | `"files/source.txt"`                    | Input text file                                        |
+|               | `target_file_path`             | —                                       | Set to enable **review mode**                          |
+|               | `auto_glossary`                | `false`                                 | Match auto glossary against source                     |
+|               | `user_glossary_file_path`      | —                                       | Path to user glossary `.txt`                           |
+| `output_data` | `result_file_path`             | `"files/result.md"`                     | Output file                                            |
+|               | `raw_result_file_path`         | `"files/raw_result.json"`               | (unused)                                               |
+|               | `print_prompt_only`            | `false`                                 | Dry-run: print prompts, skip LLM                       |
+|               | `timestamped_result_filenames` | `true`                                  | Append `_YYYY-MM-DD_HH-MM-SS`                          |
+| `llm`         | `base_url`                     | `https://openrouter.ai/api/v1`          |                                                        |
+|               | `api_key`                      | from `.env`                             | OpenRouter key                                         |
+|               | `model`                        | `"anthropic/claude-3.5-sonnet"`         | Any OpenRouter model string                            |
+|               | `temperature`                  | —                                       | `float` or unset for model default                     |
+|               | `reasoning_effort`             | —                                       | `none`, `minimal`, `low`, `medium`, `high`, `xhigh`    |
+| `chunk`       | `size`                         | `6000`                                  | Max chunk size in characters                           |
+|               | `divider`                      | —                                       | Char for manual chunking (splits on `----------` etc.) |
+|               | `max_concurrent`               | `3`                                     | Max simultaneous LLM calls per task                    |
+|               | `delay_seconds`                | `1.5`                                   | Seconds between launching chunk tasks                  |
+| `glossary`    | `xml_dir_path`                 | `"files/glossary"`                      | Dir with Multiterm `.xml` exports                      |
+|               | `known_abbrs_file_path`        | —                                       | Path to abbreviations list                             |
+| `log`         | `level`                        | `"INFO"`                                | `DEBUG`/`INFO`/`WARNING`/`ERROR`/`CRITICAL`            |
+|               | `format`                       | loguru default                          | Custom log format string                               |
+| `email`       | `resend_api_key`               | from `.env`                             | Resend API key for sending/receiving emails            |
+|               | `resend_webhook_secret`        | from `.env`                             | Resend webhook signing secret (`whsec_...`)            |
+|               | `from_address`                 | `"Translation Agent <trsl@resend.dev>"` | From address for reply emails                          |
+|               | `allowed_senders`              | `[]`                                    | Whitelist of sender emails for `serve-emails`          |
+|               | `sender_whitelist_enabled`     | `true`                                  | Enforce sender whitelist                               |
+|               | `allowed_recipient`            | —                                       | Only process webhooks for this exact To address        |
+|               | `listen_host`                  | `"0.0.0.0"`                             | Host for the webhook HTTP server                       |
+|               | `listen_port`                  | `8025`                                  | Port for the webhook HTTP server                       |
+|               | `max_attachment_size_mb`       | `10`                                    | Maximum individual attachment size in MB               |
 
 ### `.env` entries
 
@@ -130,6 +144,15 @@ CHUNK__MAX_CONCURRENT=3
 CHUNK__DELAY_SECONDS=1.5
 GLOSSARY__XML_DIR_PATH=files/glossary
 GLOSSARY__KNOWN_ABBRS_FILE_PATH=files/abbrs
+EMAIL__RESEND_API_KEY=re_your_resend_api_key
+EMAIL__RESEND_WEBHOOK_SECRET=whsec_your_webhook_secret
+EMAIL__FROM_ADDRESS=Translation Agent <trsl@mydomain.com>
+EMAIL__ALLOWED_SENDERS=["trusted@example.com","trusted2@example.com"]
+EMAIL__SENDER_WHITELIST_ENABLED=true
+EMAIL__ALLOWED_RECIPIENT=trsl@mydomain.com
+EMAIL__LISTEN_HOST=0.0.0.0
+EMAIL__LISTEN_PORT=8025
+EMAIL__MAX_ATTACHMENT_SIZE_MB=10
 LOG__LEVEL=INFO
 ```
 
@@ -202,6 +225,41 @@ python src/glossary/get_abbrs.py files/config.toml
 ```
 
 Scans the auto glossary for abbreviation-like terms (all-uppercase or mixed-case, ≤8 chars) and writes them to `files/abbrs`. These are then excluded from lemmatization during matching.
+
+### Email-based translation (webhook server)
+
+Run the agent as a long-lived webhook server that accepts translation/review requests via email (Resend inbound email + webhooks):
+
+```bash
+python src/cli.py serve-emails files/config.toml
+```
+
+**How it works:**
+
+1. A sender emails an attachment bundle to the configured address (`allowed_recipient`).
+2. Resend forwards the email via a signed webhook (Svix) to `POST /webhook/email`.
+3. The server verifies the signature, checks the sender against the whitelist, fetches the email body and attachments from the Resend API.
+4. Attachments are parsed: `config.toml` (optional, overrides server defaults), `source.txt`, `target.txt` (for review), `glossary.txt` (user glossary). If `source.txt` is missing, the plain-text email body is used as source.
+5. The translation/review pipeline runs and the result is emailed back as a threaded reply.
+
+**Attachment conventions for senders:**
+
+- `source.txt` — source text to translate or review (UTF-8)
+- `target.txt` — existing translation for review mode only; triggers review vs. translation
+- `glossary.txt` — user glossary overrides (`term = translation` per line)
+- `config.toml` — optional per-request config (languages, chunk settings, LLM params, etc.)
+
+**Security:**
+
+- Webhook payloads are verified with Svix HMAC-SHA256 signatures (secret in `email.resend_webhook_secret`)
+- Sender whitelist (`email.allowed_senders`) restricts who can submit requests (disabled when whitelist is empty or `sender_whitelist_enabled = false`)
+- Optional recipient filtering (`email.allowed_recipient`) ignores webhooks for other addresses
+- Attachments are capped at `email.max_attachment_size_mb` (default 10 MB)
+
+**Deployment:**
+
+Sample nginx reverse-proxy config is in `infra/nginx.conf` (TLS termination + proxy to `127.0.0.1:8025`).
+A systemd unit file is in `infra/trslagent-email.service`.
 
 ## Glossary
 

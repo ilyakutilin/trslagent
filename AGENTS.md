@@ -3,6 +3,9 @@
 ## Entrypoint
 
 - The **only** CLI is `python src/cli.py <config.toml>` — a single config-driven entrypoint.
+- Additional subcommands:
+  - `python src/cli.py <config.toml> --match-glossary --match-output <path>` — export glossary matches.
+  - `python src/cli.py serve-emails <config.toml>` — start the email webhook server.
 
 ## Environment & Setup
 
@@ -42,6 +45,26 @@
 - Without `chunk.divider`: sends the full source + target text to the LLM for proofreading (no chunking).
 - With `chunk.divider` set: splits both source and target on the divider character (repeated 10+ times). The number of source and target chunks must be equal — otherwise a `ValueError` is raised. Each source/target chunk pair is reviewed concurrently (same semaphore/gather/delay as translation).
 - Returns a list of critical mistakes: missing translations, distortions, spelling, numbers, dictionary deviations.
+
+## Email Server (Webhook)
+
+- Started via `python src/cli.py serve-emails <config.toml>`.
+- Runs an `aiohttp` HTTP server on `email.listen_host`:`email.listen_port` (default `0.0.0.0:8025`).
+- Listens on `POST /webhook/email` for Resend inbound email webhooks.
+- Uses `src/email_server.py` (server) + `src/email_processor.py` (Resend API client).
+- **Svix signature verification**: webhook payloads are verified via HMAC-SHA256 against `email.resend_webhook_secret` (`whsec_...`), with a 5-minute timestamp tolerance window. If no secret is configured, verification is skipped (logged warning).
+- **Sender whitelist**: if `email.sender_whitelist_enabled` is true (default), only senders in `email.allowed_senders` are accepted. An empty list disables enforcement.
+- **Recipient filtering**: if `email.allowed_recipient` is set, only webhooks for that specific To address are processed; others are silently ignored.
+- On receipt: fetches the email body and attachment list from the Resend Receiving API, downloads each attachment (cap: `email.max_attachment_size_mb`, default 10 MB per file).
+- **Configuration from attachments**:
+  - `config.toml` (optional) — per-request settings; file-path keys are patched out so `InputData` validation doesn't try to read missing files. Falls back to the server's default config loaded at startup.
+  - `source.txt` — source text; if absent, the plain-text email body is used.
+  - `target.txt` — existing translation (triggers review mode instead of translation).
+  - `glossary.txt` — user glossary overrides (`term = translation` lines).
+- Runs the full translation/review pipeline (`src/main.py:main`) with the constructed settings.
+- Sends the result back as a threaded reply via the Resend Send API (`In-Reply-To` header set to the original `message_id`).
+- Error replies are sent on attachment-too-large, fetch failure, parsing failure, pipeline failure, or empty output.
+- Deployment helpers: `infra/nginx.conf` (TLS-terminating reverse proxy) and `infra/trslagent-email.service` (systemd unit).
 
 ## Translation (Async Chunks)
 
