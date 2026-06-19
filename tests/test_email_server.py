@@ -20,7 +20,7 @@ from src.email_server import (
     serve,
 )
 
-WSEC = "whsec_c2VjcmV0LWtleS1mb3ItdGVzdGluZw=="
+WSEC = "whsec_a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0=="
 
 
 def _make_svix_signature(
@@ -113,7 +113,7 @@ class TestVerifySvix:
 
     def test_returns_false_for_wrong_secret(self):
         payload = b'{"type":"email.received"}'
-        wrong_secret = "whsec_YW5vdGhlci1zZWNyZXQ="
+        wrong_secret = "whsec_b1b1b1b1b1b1b1b1b1b="
         headers = _make_svix_headers(payload, secret=wrong_secret)
         assert _verify_svix(payload, headers, WSEC) is False
 
