@@ -147,21 +147,7 @@ async def _process_inbound(
         email_settings.allowed_senders,
         email_settings.sender_whitelist_enabled,
     ):
-        logger.info("Rejected request from unauthorized sender: {}", sender)
-        try:
-            await send_reply(
-                to=sender,
-                subject=subject,
-                body=(
-                    "Your email address is not authorized to use this translation service.\n\n"
-                    "Please contact the administrator for access."
-                ),
-                message_id=message_id,
-                from_address=email_settings.from_address,
-                api_key=api_key,
-            )
-        except Exception:
-            logger.exception("Failed to send rejection reply to {}", sender)
+        logger.warning("Rejected request from unauthorized sender: {}", sender)
         return
 
     try:
