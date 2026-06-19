@@ -71,9 +71,7 @@ class ChunkSettings(BaseSettings):
             "Overrides size-based chunking. Applied to both source and target in review mode."
         ),
     )
-    max_concurrent: int = Field(
-        default=3, description="Max simultaneous LLM API calls"
-    )
+    max_concurrent: int = Field(default=3, description="Max simultaneous LLM API calls")
     delay_seconds: float = Field(
         default=1.5, description="Seconds between launching chunk tasks"
     )
@@ -121,6 +119,43 @@ class LogSettings(BaseModel):
             "<level>{message}</level>"
         ),
         description="Log format string",
+    )
+
+
+class EmailSettings(BaseModel):
+    """Email/webhook settings for receiving translation requests via Resend"""
+
+    resend_api_key: SecretStr = Field(
+        default=SecretStr(""),
+        description="Resend API key for sending and receiving emails",
+    )
+    resend_webhook_secret: str = Field(
+        default="", description="Resend webhook signing secret (whsec_...)"
+    )
+    from_address: str = Field(
+        default="Translation Agent <trsl@resend.dev>",
+        description="From address used for reply emails",
+    )
+    allowed_senders: list[str] = Field(
+        default_factory=list,
+        description="Whitelist of sender email addresses allowed to submit translation requests",
+    )
+    sender_whitelist_enabled: bool = Field(
+        default=True,
+        description="When true, only senders in allowed_senders may submit requests",
+    )
+    default_config_path: Path = Field(
+        default=Path("files/email_default_config.toml"),
+        description="Default TOML config used when no config.toml attachment is provided",
+    )
+    listen_host: str = Field(
+        default="0.0.0.0", description="Host for the webhook HTTP server"
+    )
+    listen_port: int = Field(
+        default=8025, description="Port for the webhook HTTP server"
+    )
+    max_attachment_size_mb: int = Field(
+        default=10, description="Maximum individual attachment size in MB"
     )
 
 
@@ -212,9 +247,14 @@ class InputData(BaseModel):
             except (IOError, OSError, UnicodeDecodeError) as e:
                 raise ValueError(f"Failed to read {self.target_file_path}: {e}")
 
-        if self.user_glossary_lines is None and self.user_glossary_file_path is not None:
+        if (
+            self.user_glossary_lines is None
+            and self.user_glossary_file_path is not None
+        ):
             try:
-                self.user_glossary_lines = read_lines_from_file(fp=self.user_glossary_file_path)
+                self.user_glossary_lines = read_lines_from_file(
+                    fp=self.user_glossary_file_path
+                )
             except (IOError, OSError, UnicodeDecodeError) as e:
                 raise ValueError(f"Failed to read {self.user_glossary_file_path}: {e}")
 
@@ -247,9 +287,7 @@ class OutputData(BaseModel):
         if not self.timestamped_result_filenames:
             return self.result_file_path
         ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        return self.result_file_path.with_stem(
-            f"{self.result_file_path.stem}_{ts}"
-        )
+        return self.result_file_path.with_stem(f"{self.result_file_path.stem}_{ts}")
 
 
 class TomlConfigSource(PydanticBaseSettingsSource):
@@ -301,6 +339,7 @@ class Settings(BaseSettings):
     chunk: ChunkSettings = Field(default_factory=ChunkSettings)
     glossary: GlossarySettings = Field(default_factory=GlossarySettings)
     log: LogSettings = Field(default_factory=LogSettings)
+    email: EmailSettings = Field(default_factory=EmailSettings)
     input_data: InputData = Field(default_factory=InputData)
     output_data: OutputData = Field(default_factory=OutputData)
 
