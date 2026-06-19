@@ -6,14 +6,17 @@ from src.config import get_settings
 from src.main import main, export_glossary_matches
 
 
-USAGE = "Usage: python cli.py <path/to/config.toml> [--match-glossary --match-output <path>]"
+USAGE = (
+    "Usage:\n"
+    "  python cli.py <path/to/config.toml>                     # translate or review\n"
+    "  python cli.py <path/to/config.toml> --match-glossary --match-output <path>\n"
+    "  python cli.py serve-emails <path/to/config.toml>         # start email webhook server"
+)
 
 
-def cli() -> None:
-    args = sys.argv[1:]
-
+def _parse_glossary_args(args: list[str]) -> tuple[bool, Path | None, list[str]]:
     match_glossary = False
-    match_output_path = None
+    match_output_path: Path | None = None
 
     if "--match-glossary" in args:
         match_glossary = True
@@ -26,8 +29,33 @@ def cli() -> None:
         if idx + 1 >= len(args) or args[idx + 1].startswith("--"):
             sys.exit(f"--match-output requires a path argument\n{USAGE}")
         match_output_path = Path(args[idx + 1])
-        args.pop(idx)       # --match-output
-        args.pop(idx)       # the path value
+        args.pop(idx)
+        args.pop(idx)
+
+    return match_glossary, match_output_path, args
+
+
+def cli() -> None:
+    args = sys.argv[1:]
+
+    if not args:
+        sys.exit(USAGE)
+
+    if args[0] == "serve-emails":
+        args.pop(0)
+        if len(args) != 1:
+            sys.exit(f"serve-emails requires a config.toml path\n{USAGE}")
+        toml_path = Path(args[0]).resolve()
+        if not toml_path.is_file():
+            sys.exit(f"Config file not found: {toml_path}")
+
+        from src.email_server import serve
+
+        settings = get_settings(toml_path=toml_path)
+        asyncio.run(serve(cfg=settings))
+        return
+
+    match_glossary, match_output_path, args = _parse_glossary_args(args)
 
     if len(args) != 1:
         sys.exit(USAGE)
