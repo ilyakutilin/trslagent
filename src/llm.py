@@ -153,8 +153,7 @@ async def fetch_cost(
             data = response.json()
     except Exception:
         logger.warning(
-            f"Failed to fetch cost for completion {completion_id}: "
-            f"{url}",
+            f"Failed to fetch cost for completion {completion_id}: {url}",
             exc_info=True,
         )
         return None

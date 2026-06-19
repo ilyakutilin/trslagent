@@ -12,7 +12,9 @@ from src.glossary.parser import (
 from src.lemmatizer import Lemmatizer
 
 
-def _make_entry(entry_id: int, en_terms: list[str], ru_terms: list[str]) -> GlossaryEntry:
+def _make_entry(
+    entry_id: int, en_terms: list[str], ru_terms: list[str]
+) -> GlossaryEntry:
     terms: set[Term] = set()
     for t in en_terms:
         terms.add(Term(Lang("en"), t))
@@ -87,9 +89,7 @@ class TestGlossaryXMLParser:
         assert result == Lang("en")
 
     def test_get_language_type_fallback(self):
-        lg = ET.fromstring(
-            '<languageGrp><language type="English"/></languageGrp>'
-        )
+        lg = ET.fromstring('<languageGrp><language type="English"/></languageGrp>')
         parser = GlossaryXMLParser()
         result = parser._get_language(lg)
         assert result == Lang("en")
@@ -101,16 +101,14 @@ class TestGlossaryXMLParser:
             parser._get_language(lg)
 
     def test_get_language_invalid(self):
-        lg = ET.fromstring(
-            '<languageGrp><language lang="zz"/></languageGrp>'
-        )
+        lg = ET.fromstring('<languageGrp><language lang="zz"/></languageGrp>')
         parser = GlossaryXMLParser()
         with pytest.raises(ValueError):
             parser._get_language(lg)
 
     def test_get_entry_terms_single(self):
         lg = ET.fromstring(
-            '<languageGrp><termGrp><term>flow meter</term></termGrp></languageGrp>'
+            "<languageGrp><termGrp><term>flow meter</term></termGrp></languageGrp>"
         )
         parser = GlossaryXMLParser()
         result = parser._get_entry_terms_for_lang(lg)
@@ -118,7 +116,7 @@ class TestGlossaryXMLParser:
 
     def test_get_entry_terms_semicolon_synonyms(self):
         lg = ET.fromstring(
-            '<languageGrp><termGrp><term>a;b</term></termGrp></languageGrp>'
+            "<languageGrp><termGrp><term>a;b</term></termGrp></languageGrp>"
         )
         parser = GlossaryXMLParser()
         result = parser._get_entry_terms_for_lang(lg)
@@ -126,7 +124,7 @@ class TestGlossaryXMLParser:
 
     def test_get_entry_terms_pipe_synonyms(self):
         lg = ET.fromstring(
-            '<languageGrp><termGrp><term>x|y</term></termGrp></languageGrp>'
+            "<languageGrp><termGrp><term>x|y</term></termGrp></languageGrp>"
         )
         parser = GlossaryXMLParser()
         result = parser._get_entry_terms_for_lang(lg)
@@ -134,7 +132,7 @@ class TestGlossaryXMLParser:
 
     def test_get_entry_terms_empty(self):
         lg = ET.fromstring(
-            '<languageGrp><termGrp><term></term></termGrp></languageGrp>'
+            "<languageGrp><termGrp><term></term></termGrp></languageGrp>"
         )
         parser = GlossaryXMLParser()
         with pytest.raises(ValueError, match="all the terms in termGrp are empty"):
@@ -150,9 +148,7 @@ class TestGlossaryXMLParser:
         ids = {e.id for e in entries}
         assert ids == {1, 2}
 
-        en_terms_all = {
-            (t.value, t.language) for e in entries for t in e.terms
-        }
+        en_terms_all = {(t.value, t.language) for e in entries for t in e.terms}
         assert en_terms_all == {
             ("flow meter", en_lang),
             ("pressure valve", en_lang),
@@ -247,9 +243,7 @@ class TestGlossaryUpdater:
 class TestUserGlossaryParser:
     def test_parse_simple(self, mocker, en_lang, ru_lang):
         mocker.patch.object(Lemmatizer, "lemmatize", return_value=["dummy"])
-        parser = UserGlossaryParser(
-            ["flow meter = расходомер"], en_lang, ru_lang
-        )
+        parser = UserGlossaryParser(["flow meter = расходомер"], en_lang, ru_lang)
         entries = parser.parse()
         assert len(entries) == 1
         entry = entries[0]
@@ -260,9 +254,7 @@ class TestUserGlossaryParser:
 
     def test_parse_synonyms(self, mocker, en_lang, ru_lang):
         mocker.patch.object(Lemmatizer, "lemmatize", return_value=["dummy"])
-        parser = UserGlossaryParser(
-            ["a;b = x|y"], en_lang, ru_lang
-        )
+        parser = UserGlossaryParser(["a;b = x|y"], en_lang, ru_lang)
         entries = parser.parse()
         assert len(entries) == 1
         entry = entries[0]

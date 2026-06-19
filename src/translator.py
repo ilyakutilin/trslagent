@@ -112,8 +112,11 @@ class Translator:
         print("=" * 35 + "\n")
 
     async def translate_chunk_async(
-        self, chunk: str, user_glossary_str: str, auto_glossary_str: str,
-        is_extract: bool
+        self,
+        chunk: str,
+        user_glossary_str: str,
+        auto_glossary_str: str,
+        is_extract: bool,
     ) -> tuple[str | None, str | None]:
         logger.info(f"Translating chunk (length={len(chunk)})")
 

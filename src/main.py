@@ -83,18 +83,14 @@ async def _resolve_and_log_cost(
     if not completion_ids:
         return
 
-    cost_tasks = [
-        fetch_cost(cid, api_key, cfg.cost) for cid in completion_ids
-    ]
+    cost_tasks = [fetch_cost(cid, api_key, cfg.cost) for cid in completion_ids]
     cost_results = await asyncio.gather(*cost_tasks, return_exceptions=True)
 
     known_costs: list[float] = []
     unknown_count = 0
     for i, c in enumerate(cost_results):
         if isinstance(c, BaseException):
-            logger.warning(
-                f"Cost fetch failed for completion {completion_ids[i]}: {c}"
-            )
+            logger.warning(f"Cost fetch failed for completion {completion_ids[i]}: {c}")
             unknown_count += 1
         elif c is None:
             unknown_count += 1
@@ -110,9 +106,7 @@ async def _resolve_and_log_cost(
             f" ({unknown_count}/{len(completion_ids)} unknown)"
         )
     else:
-        logger.info(
-            f"Cost: {known_total:.2f} {cfg.cost.cost_currency}"
-        )
+        logger.info(f"Cost: {known_total:.2f} {cfg.cost.cost_currency}")
 
 
 async def main(cfg: Settings) -> str | None:
@@ -174,7 +168,9 @@ async def main(cfg: Settings) -> str | None:
                     matched = term_matcher.match(
                         text=chunk, lang=source_lang, lemmatizer=lemmatizer
                     )
-                    return _deduplicate_entries(matched, user_glossary_entries, source_lang)
+                    return _deduplicate_entries(
+                        matched, user_glossary_entries, source_lang
+                    )
                 return user_glossary_entries.copy(), []
 
             review_results: list[str] = []
@@ -186,9 +182,15 @@ async def main(cfg: Settings) -> str | None:
                         f"Processing review chunk {i + 1}/{len(src_chunks)} "
                         f"(src_length={len(src)}, tgt_length={len(tgt)})"
                     )
-                    chunk_user_entries, chunk_auto_entries = _glossary_for_review_chunk(src)
-                    user_g_str = _stringify_glossary(chunk_user_entries, source_lang, target_lang)
-                    auto_g_str = _stringify_glossary(chunk_auto_entries, source_lang, target_lang)
+                    chunk_user_entries, chunk_auto_entries = _glossary_for_review_chunk(
+                        src
+                    )
+                    user_g_str = _stringify_glossary(
+                        chunk_user_entries, source_lang, target_lang
+                    )
+                    auto_g_str = _stringify_glossary(
+                        chunk_auto_entries, source_lang, target_lang
+                    )
                     await reviewer.review_text_async(src, tgt, user_g_str, auto_g_str)
                 return None
 
@@ -202,10 +204,18 @@ async def main(cfg: Settings) -> str | None:
                         f"Reviewing chunk {i + 1}/{len(src_chunks)} "
                         f"(src_length={len(src_chunk)}, tgt_length={len(tgt_chunk)})"
                     )
-                    chunk_user_entries, chunk_auto_entries = _glossary_for_review_chunk(src_chunk)
-                    user_g_str = _stringify_glossary(chunk_user_entries, source_lang, target_lang)
-                    auto_g_str = _stringify_glossary(chunk_auto_entries, source_lang, target_lang)
-                    return await reviewer.review_text_async(src_chunk, tgt_chunk, user_g_str, auto_g_str)
+                    chunk_user_entries, chunk_auto_entries = _glossary_for_review_chunk(
+                        src_chunk
+                    )
+                    user_g_str = _stringify_glossary(
+                        chunk_user_entries, source_lang, target_lang
+                    )
+                    auto_g_str = _stringify_glossary(
+                        chunk_auto_entries, source_lang, target_lang
+                    )
+                    return await reviewer.review_text_async(
+                        src_chunk, tgt_chunk, user_g_str, auto_g_str
+                    )
 
             tasks = [
                 _process_single_review_chunk(i, src, tgt)
@@ -294,7 +304,9 @@ async def main(cfg: Settings) -> str | None:
     text = cfg.input_data.source_text or ""
     if cfg.chunk.divider:
         chunks = split_by_divider(text=text, divider=cfg.chunk.divider)
-        logger.info(f"Split text into {len(chunks)} chunks using divider '{cfg.chunk.divider}'")
+        logger.info(
+            f"Split text into {len(chunks)} chunks using divider '{cfg.chunk.divider}'"
+        )
     else:
         chunks = split_text(text=text, chunk_size=cfg.chunk.size)
         logger.info(f"Split text into {len(chunks)} chunks (size={cfg.chunk.size})")
@@ -323,16 +335,12 @@ async def main(cfg: Settings) -> str | None:
                 lang=source_lang,
                 lemmatizer=lemmatizer,
             )
-            return _deduplicate_entries(
-                matched, user_entries, source_lang
-            )
+            return _deduplicate_entries(matched, user_entries, source_lang)
         return user_entries.copy(), []
 
     if llm is None:
         for i, chunk in enumerate(chunks):
-            logger.info(
-                f"Processing chunk {i + 1}/{len(chunks)} (length={len(chunk)})"
-            )
+            logger.info(f"Processing chunk {i + 1}/{len(chunks)} (length={len(chunk)})")
             chunk_user_entries, chunk_auto_entries = _get_chunk_glossary(
                 chunk, term_matcher, user_glossary_entries, source_lang, lemmatizer
             )
@@ -359,9 +367,7 @@ async def main(cfg: Settings) -> str | None:
             await asyncio.sleep(cfg.chunk.delay_seconds)
 
         async with semaphore:
-            logger.info(
-                f"Processing chunk {i + 1}/{len(chunks)} (length={len(chunk)})"
-            )
+            logger.info(f"Processing chunk {i + 1}/{len(chunks)} (length={len(chunk)})")
 
             chunk_user_entries, chunk_auto_entries = _get_chunk_glossary(
                 chunk, term_matcher, user_glossary_entries, source_lang, lemmatizer
@@ -386,9 +392,7 @@ async def main(cfg: Settings) -> str | None:
     completion_ids: list[str] = []
     for i, result in enumerate(results):
         if isinstance(result, BaseException):
-            logger.warning(
-                f"Chunk {i+1} failed with error: {result}, skipping"
-            )
+            logger.warning(f"Chunk {i + 1} failed with error: {result}, skipping")
         elif result is not None:
             chunk_text, chunk_id = result
             if chunk_text is not None:
@@ -397,14 +401,12 @@ async def main(cfg: Settings) -> str | None:
                 completion_ids.append(chunk_id)
         else:
             logger.warning(
-                f"Chunk {i+1} translation returned None unexpectedly, skipping"
+                f"Chunk {i + 1} translation returned None unexpectedly, skipping"
             )
 
     logger.info(f"Stitching {len(translated_chunks)} chunks together")
     result = stitch_chunks(translated_chunks)
-    logger.info(
-        f"Translation complete: {len(text)} -> {len(result)} characters"
-    )
+    logger.info(f"Translation complete: {len(text)} -> {len(result)} characters")
 
     api_key = cfg.llm.api_key.get_secret_value()
     await _resolve_and_log_cost(completion_ids, api_key, cfg)

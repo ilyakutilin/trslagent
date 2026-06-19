@@ -111,7 +111,9 @@ class TestFetchCost:
         assert result is None
 
 
-def _make_completion(content: str | None, completion_id: str = "test-id") -> ChatCompletion:
+def _make_completion(
+    content: str | None, completion_id: str = "test-id"
+) -> ChatCompletion:
     return ChatCompletion(
         id=completion_id,
         choices=[

@@ -144,7 +144,9 @@ class TestBuildUserPrompt:
 
 class TestTranslateChunkAsync:
     @pytest.fixture
-    def translator_with_llm(self, en_lang: Lang, ru_lang: Lang, mock_llm: AsyncMock) -> Translator:
+    def translator_with_llm(
+        self, en_lang: Lang, ru_lang: Lang, mock_llm: AsyncMock
+    ) -> Translator:
         return Translator(
             source_lang=en_lang,
             target_lang=ru_lang,
@@ -155,7 +157,9 @@ class TestTranslateChunkAsync:
         )
 
     @pytest.mark.asyncio
-    async def test_llm_available(self, translator_with_llm: Translator, sample_text: str, mock_llm: AsyncMock):
+    async def test_llm_available(
+        self, translator_with_llm: Translator, sample_text: str, mock_llm: AsyncMock
+    ):
         translated, cid = await translator_with_llm.translate_chunk_async(
             chunk=sample_text,
             user_glossary_str="",
@@ -192,7 +196,9 @@ class TestTranslateChunkAsync:
         assert f"Text for translation:\n{sample_text}" in captured.out
 
     @pytest.mark.asyncio
-    async def test_with_glossary_passed_to_llm(self, translator_with_llm: Translator, sample_text: str, mock_llm: AsyncMock):
+    async def test_with_glossary_passed_to_llm(
+        self, translator_with_llm: Translator, sample_text: str, mock_llm: AsyncMock
+    ):
         user_glossary = "flow meter = расходомер"
         auto_glossary = "pressure valve = клапан давления"
         await translator_with_llm.translate_chunk_async(
@@ -208,7 +214,9 @@ class TestTranslateChunkAsync:
         assert "pressure valve" in call_kwargs["system_prompt"]
 
     @pytest.mark.asyncio
-    async def test_is_extract_passed_to_llm(self, translator_with_llm: Translator, sample_text: str, mock_llm: AsyncMock):
+    async def test_is_extract_passed_to_llm(
+        self, translator_with_llm: Translator, sample_text: str, mock_llm: AsyncMock
+    ):
         translator_with_llm.doc_type = "report"
         translator_with_llm.doc_title = "Test Doc"
         await translator_with_llm.translate_chunk_async(

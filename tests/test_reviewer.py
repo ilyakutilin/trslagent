@@ -31,9 +31,7 @@ class TestBuildSystemPrompt:
         assert "specialized in medicine" in result
 
     def test_with_doc_type_and_title(self, en_lang: Lang, ru_lang: Lang):
-        reviewer = Reviewer(
-            en_lang, ru_lang, None, "report", "Annual Review", None
-        )
+        reviewer = Reviewer(en_lang, ru_lang, None, "report", "Annual Review", None)
         result = reviewer._build_system_prompt(
             user_glossary_str="",
             auto_glossary_str="",
@@ -42,9 +40,7 @@ class TestBuildSystemPrompt:
         assert "Annual Review" in result
 
     def test_with_doc_title_only(self, en_lang: Lang, ru_lang: Lang):
-        reviewer = Reviewer(
-            en_lang, ru_lang, None, None, "Annual Review", None
-        )
+        reviewer = Reviewer(en_lang, ru_lang, None, None, "Annual Review", None)
         result = reviewer._build_system_prompt(
             user_glossary_str="",
             auto_glossary_str="",

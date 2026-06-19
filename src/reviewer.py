@@ -61,9 +61,7 @@ class Reviewer:
         if any((self.doc_type, self.doc_title)):
             doc_type = self.doc_type if self.doc_type else "document"
             titled = f" titled '{self.doc_title}'" if self.doc_title else ""
-            text_description_section = (
-                f"\nThe text is a {doc_type}{titled}."
-            )
+            text_description_section = f"\nThe text is a {doc_type}{titled}."
 
         has_user_glossary = bool(user_glossary_str)
         dictionary_part = ""
@@ -108,9 +106,7 @@ class Reviewer:
         logger.debug(f"Built system prompt: {result}")
         return result
 
-    def _build_user_prompt(
-        self, source_text: str, target_text: str
-    ) -> str:
+    def _build_user_prompt(self, source_text: str, target_text: str) -> str:
         result = (
             f"{self.source_lang.name}: {source_text} "
             f"|| {self.target_lang.name}: {target_text}"
@@ -127,8 +123,11 @@ class Reviewer:
         print("=" * 35 + "\n")
 
     async def review_text_async(
-        self, source_text: str, target_text: str,
-        user_glossary_str: str, auto_glossary_str: str,
+        self,
+        source_text: str,
+        target_text: str,
+        user_glossary_str: str,
+        auto_glossary_str: str,
     ) -> tuple[str | None, str | None]:
         logger.info(
             f"Reviewing text "
@@ -152,8 +151,6 @@ class Reviewer:
             system_prompt=system_prompt,
             user_prompt=user_prompt,
         )
-        logger.debug(
-            f"Received review: {len(result)} characters"
-        )
+        logger.debug(f"Received review: {len(result)} characters")
 
         return result, completion_id

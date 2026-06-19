@@ -80,14 +80,16 @@ class TestLogSettingsDefaults:
 class TestInputData:
     def test_raises_when_source_lang_equals_target_lang(self):
         with pytest.raises(ValueError, match="source and target langs"):
-            InputData(source_lang=Lang("en"), target_lang=Lang("en"),
-                      source_text="test")
+            InputData(
+                source_lang=Lang("en"), target_lang=Lang("en"), source_text="test"
+            )
 
     def test_reads_source_text_from_file(self, tmp_path):
         fp = tmp_path / "source.txt"
         fp.write_text("File content here.")
         data = InputData(
-            source_lang=Lang("en"), target_lang=Lang("ru"),
+            source_lang=Lang("en"),
+            target_lang=Lang("ru"),
             source_file_path=fp,
         )
         assert data.source_text == "File content here."
@@ -98,7 +100,8 @@ class TestInputData:
         target_fp = tmp_path / "target.txt"
         target_fp.write_text("target content")
         data = InputData(
-            source_lang=Lang("en"), target_lang=Lang("ru"),
+            source_lang=Lang("en"),
+            target_lang=Lang("ru"),
             source_file_path=source_fp,
             target_file_path=target_fp,
         )
@@ -110,18 +113,22 @@ class TestInputData:
         gl_fp = tmp_path / "glossary.txt"
         gl_fp.write_text("term = translation\nanother = другой\n")
         data = InputData(
-            source_lang=Lang("en"), target_lang=Lang("ru"),
+            source_lang=Lang("en"),
+            target_lang=Lang("ru"),
             source_file_path=source_fp,
             user_glossary_file_path=str(gl_fp),
         )
-        assert data.user_glossary_lines == ["term = translation\n",
-                                             "another = другой\n"]
+        assert data.user_glossary_lines == [
+            "term = translation\n",
+            "another = другой\n",
+        ]
 
     def test_user_glossary_lines_none_by_default(self, tmp_path):
         fp = tmp_path / "source.txt"
         fp.write_text("source")
         data = InputData(
-            source_lang=Lang("en"), target_lang=Lang("ru"),
+            source_lang=Lang("en"),
+            target_lang=Lang("ru"),
             source_file_path=fp,
         )
         assert data.user_glossary_lines is None
@@ -130,7 +137,8 @@ class TestInputData:
         bad_path = Path("/nonexistent/path.txt")
         with pytest.raises(ValueError, match=r"Failed to read .*nonexistent"):
             InputData(
-                source_lang=Lang("en"), target_lang=Lang("ru"),
+                source_lang=Lang("en"),
+                target_lang=Lang("ru"),
                 source_file_path=bad_path,
             )
 
@@ -167,10 +175,7 @@ class TestOutputData:
 class TestTomlConfigSource:
     def test_reads_values_from_toml(self, tmp_path):
         toml_path = tmp_path / "config.toml"
-        toml_path.write_text(
-            '[llm]\nmodel = "test-model"\n'
-            '[chunk]\nsize = 8000\n'
-        )
+        toml_path.write_text('[llm]\nmodel = "test-model"\n[chunk]\nsize = 8000\n')
         source = TomlConfigSource(Settings, toml_path)
         result = source()
         assert result["llm"]["model"] == "test-model"
@@ -193,9 +198,9 @@ class TestGetSettings:
         source_fp.write_text("dummy")
         toml_path = tmp_path / "config.toml"
         toml_path.write_text(
-            '[chunk]\nsize = 9999\n'
+            "[chunk]\nsize = 9999\n"
             '[llm]\nmodel = "my-model"\n'
-            '[input_data]\n'
+            "[input_data]\n"
             'source_lang = "en"\n'
             'target_lang = "ru"\n'
             f'source_file_path = "{source_fp}"\n'

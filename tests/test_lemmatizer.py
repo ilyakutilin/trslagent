@@ -103,9 +103,7 @@ class TestLemmatizeRussian:
 
     @pytest.mark.nlp
     def test_preserves_known_abbreviation(self, lemmatizer_with_abbrs):
-        result = lemmatizer_with_abbrs.lemmatize(
-            "ГОСТ требует проверки", Lang("ru")
-        )
+        result = lemmatizer_with_abbrs.lemmatize("ГОСТ требует проверки", Lang("ru"))
         assert result is not None
         assert result == ["ГОСТ", "требовать", "проверка"]
 

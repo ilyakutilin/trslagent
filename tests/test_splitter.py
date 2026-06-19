@@ -8,8 +8,10 @@ class TestSplitText:
         assert result[0] == "Short text."
 
     def test_longer_than_chunk_size_returns_multiple_chunks(self):
-        text = ("Sentence A. Sentence B. Sentence C. Sentence D. "
-                "Sentence E. Sentence F. Sentence G. Sentence H.")
+        text = (
+            "Sentence A. Sentence B. Sentence C. Sentence D. "
+            "Sentence E. Sentence F. Sentence G. Sentence H."
+        )
         result = split_text(text, chunk_size=50)
         assert len(result) > 1
         reconstructed = "".join(result)
@@ -49,6 +51,7 @@ class TestSplitText:
 
     def test_chunk_size_zero(self):
         import pytest
+
         with pytest.raises(ValueError, match="chunk_size must be > 0"):
             split_text("Some text here", chunk_size=0)
 

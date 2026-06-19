@@ -453,8 +453,7 @@ class UserGlossaryParser:
             parts = [part.strip() for part in line.split("=", 1)]
             if len(parts) != 2 or not all(parts):
                 logger.warning(
-                    "Failed to parse malformed line "
-                    f"in the user glossary file: {line}"
+                    f"Failed to parse malformed line in the user glossary file: {line}"
                 )
                 continue
 

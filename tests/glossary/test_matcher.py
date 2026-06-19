@@ -21,8 +21,7 @@ class FakeLemmatizer:
 def _make_entry(entry_id: int, *en_values: str) -> GlossaryEntry:
     en_terms = [Term(Lang("en"), v, lemmatized=v.lower()) for v in en_values]
     ru_terms = [
-        Term(Lang("ru"), f"ru_{v}", lemmatized=f"ru_{v.lower()}")
-        for v in en_values
+        Term(Lang("ru"), f"ru_{v}", lemmatized=f"ru_{v.lower()}") for v in en_values
     ]
     return GlossaryEntry(id=entry_id, terms=frozenset(en_terms + ru_terms))
 
@@ -231,9 +230,7 @@ class TestMatch:
         e2 = _make_entry(2, "flow")
         matcher = TermMatcher([e1, e2])
 
-        result = matcher.match(
-            "the flow is steady", Lang("en"), lemmatizer=lemmatizer
-        )
+        result = matcher.match("the flow is steady", Lang("en"), lemmatizer=lemmatizer)
         assert len(result) == 2
         assert e1 in result
         assert e2 in result
