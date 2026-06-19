@@ -148,10 +148,6 @@ class EmailSettings(BaseModel):
         default=None,
         description="If set, only webhooks for emails sent to this exact address are processed; others are logged and silently ignored",
     )
-    default_config_path: Path = Field(
-        default=Path("files/email_default_config.toml"),
-        description="Default TOML config used when no config.toml attachment is provided",
-    )
     listen_host: str = Field(
         default="0.0.0.0", description="Host for the webhook HTTP server"
     )

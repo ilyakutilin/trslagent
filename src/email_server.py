@@ -211,7 +211,7 @@ async def _process_inbound(
         translation_settings = build_settings_from_email(
             attachment_bodies=attachment_bodies,
             email_body=email_body,
-            default_config_path=email_settings.default_config_path,
+            default_cfg=cfg,
         )
     except Exception:
         logger.exception("Failed to build settings from email")

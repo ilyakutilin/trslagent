@@ -127,44 +127,56 @@ def build_settings_from_email(
     *,
     attachment_bodies: dict[str, bytes],
     email_body: str,
-    default_config_path: Path,
+    default_cfg: Settings,
 ) -> Settings:
     """Construct a Settings object from email attachments and body.
 
     Loads settings from an attached *config.toml* (if present) or the
-    default config.  Source / target / glossary texts are supplied
+    server's default config.  Source / target / glossary texts are supplied
     directly, bypassing file reads.
     """
-    with tempfile.TemporaryDirectory() as tmpdir:
-        tmp = Path(tmpdir)
+    source_text: str | None = None
+    target_text: str | None = None
+    glossary_lines: list[str] | None = None
 
-        source_text: str | None = None
-        target_text: str | None = None
-        glossary_lines: list[str] | None = None
+    if "source.txt" in attachment_bodies:
+        source_text = attachment_bodies["source.txt"].decode("utf-8")
 
-        if "source.txt" in attachment_bodies:
-            source_text = attachment_bodies["source.txt"].decode("utf-8")
+    if "target.txt" in attachment_bodies:
+        target_text = attachment_bodies["target.txt"].decode("utf-8")
 
-        if "target.txt" in attachment_bodies:
-            target_text = attachment_bodies["target.txt"].decode("utf-8")
+    if "glossary.txt" in attachment_bodies:
+        glossary_lines = attachment_bodies["glossary.txt"].decode("utf-8").splitlines()
 
-        if "glossary.txt" in attachment_bodies:
-            glossary_lines = (
-                attachment_bodies["glossary.txt"].decode("utf-8").splitlines()
-            )
-
-        config_path: Path
-        if "config.toml" in attachment_bodies:
+    if "config.toml" in attachment_bodies:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmp = Path(tmpdir)
             raw_toml = attachment_bodies["config.toml"].decode("utf-8")
             raw_toml = _patch_toml_for_attachments(
                 raw_toml, source_text, target_text, glossary_lines
             )
             config_path = tmp / "config.toml"
             config_path.write_text(raw_toml, encoding="utf-8")
-        else:
-            config_path = default_config_path
+            settings = get_settings(toml_path=config_path)
 
-        settings = get_settings(toml_path=config_path)
+        if source_text is not None:
+            settings.input_data.source_text = source_text
+        elif email_body.strip():
+            settings.input_data.source_text = email_body.strip()
+
+        if target_text is not None:
+            settings.input_data.target_text = target_text
+
+        if glossary_lines is not None:
+            settings.input_data.user_glossary_lines = glossary_lines
+
+        return settings
+
+    settings = default_cfg.model_copy(deep=True)
+    settings.output_data.print_prompt_only = False
+    settings.input_data.source_text = None
+    settings.input_data.target_text = None
+    settings.input_data.user_glossary_lines = None
 
     if source_text is not None:
         settings.input_data.source_text = source_text
