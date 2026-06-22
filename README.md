@@ -258,8 +258,22 @@ python src/cli.py serve-emails files/config.toml
 
 **Deployment:**
 
-Sample nginx reverse-proxy config is in `infra/nginx.conf` (TLS termination + proxy to `127.0.0.1:8025`).
-A systemd unit file is in `infra/trslagent-email.service`.
+1. Register a domain
+2. Register an email-related subdomain for that domain (optional but recommended)
+3. Register a webhook-related subdomain for that domain
+4. Create an account at resend.com
+5. Create an API key ([https://resend.com/docs/create-an-api-key](https://resend.com/docs/create-an-api-key)) and save it somewhere
+6. Add an email-related subdomain to Resend ([https://resend.com/docs/add-a-domain](https://resend.com/docs/add-a-domain))
+7. Create a systemd unit for the email server:
+   - Place `infra/trslagent-email.service` in `/etc/systemd/system/` (probably a good idea to change the user and group and the file paths according to your setup)
+   - `sudo systemctl daemon-reload`
+   - `sudo systemctl enable --now trslagent-email.service`
+   - `sudo systemctl status trslagent-email.service`
+8. Set up nginx that will reverse proxy to the local webhook listener (see the config at `infra/nginx.conf`)
+   - Make sure port 443 is allowed in your firewall (and the hoster if applicable)
+9. Obtain Let's Encrypt certificate for the webhook subdomain using certbot
+10. Set up a Custom Receiving Domain and configure webhooks at Resend ([https://resend.com/docs/dashboard/receiving/custom-domains](https://resend.com/docs/dashboard/receiving/custom-domains))
+11. Try sending an email to the address you configured at `EMAIL__ALLOWED_RECIPIENT`
 
 ## Glossary
 
@@ -336,10 +350,3 @@ Consider and use them only if applicable; otherwise ignore.
 SOURCE_TERM = TARGET_TERM
 <auto dictionary end>
 ```
-
-## Development notes
-
-- **No tests, no linting, no CI.** This project has none.
-- `src/models.py` is legacy/dead code — everything is in `src/config.py`.
-- `pyproject.toml` defines `trslagent = "src.cli:cli"` as a console script (available after `uv sync`).
-- The `tmp/` directory contains experimental scratch files and is not part of the production codebase.
