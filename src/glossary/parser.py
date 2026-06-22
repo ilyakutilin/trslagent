@@ -53,6 +53,11 @@ class GlossaryXMLParser:
         self.file_path = file_path
 
     def _require_file_path(self) -> Path:
+        """Return the file_path, raising ValueError if it is None.
+
+        Raises:
+            ValueError: If file_path has not been set.
+        """
         if self.file_path is None:
             raise ValueError("file_path must not be None for this operation")
         return self.file_path

@@ -53,6 +53,15 @@ class Reviewer:
     def _build_system_prompt(
         self, user_glossary_str: str, auto_glossary_str: str
     ) -> str:
+        """Builds the reviewer system prompt with persona, document context, and glossary.
+
+        Args:
+            user_glossary_str: Pre-formatted string of user-supplied glossary entries.
+            auto_glossary_str: Pre-formatted string of auto-matched glossary entries.
+
+        Returns:
+            The complete system prompt string.
+        """
         specialization_section = (
             f" specialized in {self.specialized_in}" if self.specialized_in else ""
         )
@@ -107,6 +116,15 @@ class Reviewer:
         return result
 
     def _build_user_prompt(self, source_text: str, target_text: str) -> str:
+        """Wraps source and target texts in a review request.
+
+        Args:
+            source_text: The original source text.
+            target_text: The translation to be reviewed.
+
+        Returns:
+            The user prompt string containing both source and target texts.
+        """
         result = (
             f"{self.source_lang.name}: {source_text} "
             f"|| {self.target_lang.name}: {target_text}"
@@ -115,6 +133,12 @@ class Reviewer:
         return result
 
     def _print_prompts(self, system_prompt: str, user_prompt: str) -> None:
+        """Prints system and user prompts to stdout for debugging.
+
+        Args:
+            system_prompt: The constructed system prompt.
+            user_prompt: The constructed user prompt.
+        """
         print(f"\n{'=' * 10} SYSTEM PROMPT {'=' * 10}")
         print(system_prompt)
         print("=" * 35 + "\n" * 2)
@@ -129,6 +153,19 @@ class Reviewer:
         user_glossary_str: str,
         auto_glossary_str: str,
     ) -> tuple[str | None, str | None]:
+        """Reviews an existing translation using the LLM.
+
+        Builds prompts and either calls the LLM or prints them (if no LLM is available).
+
+        Args:
+            source_text: The original source text.
+            target_text: The translation to review.
+            user_glossary_str: Pre-formatted user glossary string.
+            auto_glossary_str: Pre-formatted auto glossary string.
+
+        Returns:
+            A tuple of (review_result, completion_id), or (None, None) if LLM is unavailable.
+        """
         logger.info(
             f"Reviewing text "
             f"(source_length={len(source_text)}, "

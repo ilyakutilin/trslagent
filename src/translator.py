@@ -55,6 +55,16 @@ class Translator:
         user_glossary_str: str,
         auto_glossary_str: str,
     ) -> str:
+        """Builds the translator system prompt with persona, document context, and glossary.
+
+        Args:
+            is_extract: Whether the chunk is part of a larger document (affects wording).
+            user_glossary_str: Pre-formatted string of user-supplied glossary entries.
+            auto_glossary_str: Pre-formatted string of auto-matched glossary entries.
+
+        Returns:
+            The complete system prompt string.
+        """
         specialization_section = (
             f" specialized in {self.specialized_in}" if self.specialized_in else ""
         )
@@ -98,11 +108,25 @@ class Translator:
         return result
 
     def _build_user_prompt(self, chunk: str) -> str:
+        """Wraps the text chunk in a simple translation instruction.
+
+        Args:
+            chunk: The source text chunk to translate.
+
+        Returns:
+            The user prompt string containing the chunk text.
+        """
         result = f"Text for translation:\n{chunk}"
         logger.debug(f"Built user prompt: {result}")
         return result
 
     def _print_prompts(self, system_prompt: str, user_prompt: str) -> None:
+        """Prints system and user prompts to stdout for debugging.
+
+        Args:
+            system_prompt: The constructed system prompt.
+            user_prompt: The constructed user prompt.
+        """
         # TODO: Add chunk identification
         print(f"\n{'=' * 10} SYSTEM PROMPT {'=' * 10}")
         print(system_prompt)
@@ -118,6 +142,19 @@ class Translator:
         auto_glossary_str: str,
         is_extract: bool,
     ) -> tuple[str | None, str | None]:
+        """Translates a single text chunk using the LLM.
+
+        Builds prompts and either calls the LLM or prints them (if no LLM is available).
+
+        Args:
+            chunk: The source text chunk to translate.
+            user_glossary_str: Pre-formatted user glossary string.
+            auto_glossary_str: Pre-formatted auto glossary string.
+            is_extract: Whether this chunk is part of a multi-chunk document.
+
+        Returns:
+            A tuple of (translated_text, completion_id), or (None, None) if LLM is unavailable.
+        """
         logger.info(f"Translating chunk (length={len(chunk)})")
 
         system_prompt = self._build_system_prompt(

@@ -160,6 +160,18 @@ class EmailSettings(BaseModel):
 
 
 def parse_lang(v: Any) -> Lang:
+    """Parse a string or Lang instance into a validated Lang object.
+
+    Args:
+        v: A language string (ISO 639-1 code or full name) or a ``Lang`` instance.
+
+    Returns:
+        The validated ``Lang`` object.
+
+    Raises:
+        ValueError: If the value cannot be parsed as a valid language or is of
+            an unsupported type.
+    """
     if isinstance(v, str):
         try:
             return Lang(v)
@@ -247,6 +259,18 @@ class InputData(BaseModel):
 
     @model_validator(mode="after")
     def validate_input_data(self) -> Self:
+        """Validate the model after field population.
+
+        Ensures source and target languages differ when both are set,
+        reads source/target text from file paths if not provided inline,
+        and loads user glossary lines from file.
+
+        Returns:
+            The validated model instance.
+
+        Raises:
+            ValueError: If ``source_lang`` equals ``target_lang``.
+        """
         if (
             self.source_lang is not None
             and self.target_lang is not None
@@ -310,6 +334,12 @@ class OutputData(BaseModel):
     )
 
     def get_result_file_path(self) -> Path:
+        """Return the result file path, optionally with a timestamp suffix.
+
+        Returns:
+            The resolved ``Path``, with a timestamp appended to the stem
+            when ``timestamped_result_filenames`` is True.
+        """
         if not self.timestamped_result_filenames:
             return self.result_file_path
         ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
@@ -326,6 +356,14 @@ class TomlConfigSource(PydanticBaseSettingsSource):
     """
 
     def __init__(self, settings_cls: Type[BaseSettings], path: Path) -> None:
+        """Initialize the TOML config source.
+
+        Args:
+            settings_cls: The Pydantic settings class to populate.
+            path: Path to the TOML configuration file. If the file does not
+                exist, an empty data dict is used (all keys fall through to
+                lower-priority sources).
+        """
         super().__init__(settings_cls)
         self._data: dict[str, Any] = {}
         if path.is_file():

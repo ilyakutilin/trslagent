@@ -1,3 +1,9 @@
+"""aiohttp-based webhook server for the Resend inbound email pipeline.
+
+Receives inbound email webhooks from Resend, verifies Svix signatures,
+processes translation/review requests, and sends threaded replies.
+"""
+
 import asyncio
 import base64
 import hashlib
@@ -20,6 +26,21 @@ SIGNATURE_TOLERANCE = 300  # 5 minutes
 
 
 def _verify_svix(payload: bytes, headers: dict, secret: str) -> bool:
+    """Verify the Svix webhook signature on an inbound request.
+
+    Validates the ``svix-id``, ``svix-timestamp``, and ``svix-signature``
+    headers using HMAC-SHA256 with a 5-minute timestamp tolerance window.
+
+    Args:
+        payload: Raw request body bytes.
+        headers: Request headers dict (must contain ``svix-id``,
+            ``svix-timestamp``, and ``svix-signature``).
+        secret: The webhook signing secret (``whsec_...`` format). If
+            empty, verification is skipped and ``True`` is returned.
+
+    Returns:
+        True if the signature is valid or verification is skipped.
+    """
     if not secret:
         logger.warning("No webhook secret configured — skipping signature verification")
         return True
@@ -71,14 +92,33 @@ def _verify_svix(payload: bytes, headers: dict, secret: str) -> bool:
 
 
 def _extract_sender(from_header: str) -> str:
-    """Parse bare email address from 'Name <addr>' or 'addr'."""
+    """Extract the bare email address from a ``From`` header.
+
+    Handles both formats: ``Name <addr>`` and plain ``addr``.
+
+    Args:
+        from_header: The raw From header value.
+
+    Returns:
+        Lowercased email address without display name.
+    """
     if "<" in from_header and ">" in from_header:
         return from_header.split("<")[1].split(">")[0].strip().lower()
     return from_header.strip().lower()
 
 
 def _build_info_block(result: PipelineResult) -> str:
+    """Format pipeline result metadata into a human-readable info block.
+
+    Args:
+        result: The ``PipelineResult`` from a translation/review run.
+
+    Returns:
+        A multi-line string with request settings and usage statistics.
+    """
+
     def _fmt(val: object) -> str:
+        """Format a pipeline setting value for display."""
         if val is None:
             return "null"
         if isinstance(val, bool):
@@ -86,6 +126,7 @@ def _build_info_block(result: PipelineResult) -> str:
         return str(val)
 
     def _fmt_cost(total: float | None, currency: str, unknowns: int) -> str:
+        """Format cost information for display in the info block."""
         if total is None:
             return "UNKNOWN"
         if unknowns > 0:
@@ -119,6 +160,18 @@ def _build_info_block(result: PipelineResult) -> str:
 
 
 async def _handle_webhook(request: web.Request, cfg: Settings) -> web.Response:
+    """Handle an inbound webhook POST request from Resend.
+
+    Verifies the Svix signature, parses the JSON payload, filters by
+    event type and recipient, and dispatches processing to the background.
+
+    Args:
+        request: The aiohttp request object.
+        cfg: Server configuration (Settings object).
+
+    Returns:
+        A ``web.Response`` with appropriate status code and message.
+    """
     raw_body = await request.read()
 
     email_settings = cfg.email
@@ -180,6 +233,19 @@ async def _process_inbound(
     message_id: str,
     cfg: Settings,
 ) -> None:
+    """Fetch and process an inbound email for translation or review.
+
+    Downloads the email body and attachments, builds per-request settings,
+    runs the translation/review pipeline, and sends the result (or an
+    error) as a threaded reply.
+
+    Args:
+        email_id: Resend email ID.
+        sender: Extracted sender email address.
+        subject: Email subject line.
+        message_id: Original message Message-ID for threading replies.
+        cfg: Server configuration (Settings object).
+    """
     email_settings = cfg.email
     api_key = email_settings.resend_api_key.get_secret_value()
 
@@ -301,6 +367,17 @@ async def _send_error_reply(
     api_key: str,
     detail: str,
 ) -> None:
+    """Send an error message as a threaded reply and suppress failures.
+
+    Args:
+        sender: Recipient email address.
+        subject: Original email subject.
+        message_id: Original Message-ID for threading.
+        email_settings: ``EmailSettings`` config object with
+            ``from_address``.
+        api_key: Resend API key.
+        detail: Error message text to send.
+    """
     try:
         await send_reply(
             to=sender,
@@ -315,6 +392,14 @@ async def _send_error_reply(
 
 
 async def serve(cfg: Settings) -> None:
+    """Start the email webhook HTTP server and block indefinitely.
+
+    Registers the ``/webhook/email`` route on an aiohttp Application,
+    starts the TCP site, and waits on a never-ending event.
+
+    Args:
+        cfg: Server configuration (Settings object).
+    """
     email_cfg = cfg.email
     app = web.Application()
     app["cfg"] = cfg

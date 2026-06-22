@@ -1,3 +1,5 @@
+"""Standalone script to extract abbreviations from the auto glossary and write them to files/abbrs."""
+
 import sys
 from pathlib import Path
 
@@ -10,6 +12,14 @@ from src.lemmatizer import Lemmatizer
 
 
 def is_abbreviation(word: str) -> bool:
+    """Check if a word looks like an abbreviation (all caps or mixed case, <= 8 chars).
+
+    Args:
+        word: The word to check.
+
+    Returns:
+        True if the word appears to be an abbreviation.
+    """
     return (
         word.isupper()
         or (
@@ -21,6 +31,14 @@ def is_abbreviation(word: str) -> bool:
 
 
 def _flatten_terms(entries: list[GlossaryEntry]) -> list[Term]:
+    """Collect all lemmatized terms from all entries into a flat list.
+
+    Args:
+        entries: List of GlossaryEntry objects to flatten.
+
+    Returns:
+        A list of Term objects that have a non-None lemmatized value.
+    """
     terms: list[Term] = []
     for entry in entries:
         for term in entry.terms:
@@ -31,6 +49,7 @@ def _flatten_terms(entries: list[GlossaryEntry]) -> list[Term]:
 
 
 def main() -> None:
+    """Parse the auto glossary, extract abbreviations, and write them to files/abbrs."""
     if len(sys.argv) != 2:
         sys.exit(f"Usage: python {sys.argv[0]} <path/to/config.toml>")
 

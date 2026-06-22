@@ -1,3 +1,5 @@
+"""Aho-Corasick based matcher for finding glossary terms in source/target texts."""
+
 import ahocorasick
 from iso639 import Lang
 
@@ -6,13 +8,29 @@ from src.lemmatizer import GlossaryLemmatizer, Lemmatizer
 
 
 class TermMatcher:
+    """Matches glossary entries against text using an Aho-Corasick automaton.
+
+    Attributes:
+        entries: The list of (lemmatized) GlossaryEntry objects to search for.
+    """
+
     def __init__(
         self,
         glossary_entries: list[GlossaryEntry],
     ) -> None:
+        """Initialize a TermMatcher.
+
+        Args:
+            glossary_entries: List of lemmatized GlossaryEntry objects.
+        """
         self.entries = glossary_entries
 
     def _flatten_terms(self) -> list[Term]:
+        """Collect all lemmatized terms from all entries into a flat list.
+
+        Returns:
+            A list of Term objects that have a non-None lemmatized value.
+        """
         terms: list[Term] = []
         for entry in self.entries:
             for term in entry.terms:
@@ -22,8 +40,13 @@ class TermMatcher:
         return terms
 
     def build_automaton(self, lemmatized_terms: list[str]) -> ahocorasick.Automaton:
-        """
-        Build an Aho-Corasick automaton over lemmatized terms. Returns the automaton.
+        """Build an Aho-Corasick automaton over lemmatized terms.
+
+        Args:
+            lemmatized_terms: List of lemmatized term strings to insert.
+
+        Returns:
+            A compiled Aho-Corasick Automaton ready for iteration.
         """
         automaton = ahocorasick.Automaton()
 
@@ -35,6 +58,7 @@ class TermMatcher:
         return automaton
 
     def _build_term_entry_mapping(self) -> None:
+        """Placeholder for future term-to-entry mapping logic."""
         pass
 
     def find_glossary_entries_in_text(
@@ -44,8 +68,16 @@ class TermMatcher:
         lang: Lang,
         lemmatizer: Lemmatizer,
     ) -> list[tuple[int, int, str]]:
-        """
-        Find all terms in text, resolving overlaps by keeping longest match.
+        """Find all terms in text, resolving overlaps by keeping the longest match.
+
+        Args:
+            text: The raw text to search in.
+            automaton: A compiled Aho-Corasick automaton over lemmatized terms.
+            lang: The language of the text.
+            lemmatizer: The lemmatizer to use for tokenizing the text.
+
+        Returns:
+            A list of (start_token_idx, end_token_idx, matched_lemma) tuples.
         """
         # TODO: Fix: Finds more than needed.
         # NO (Normally Open), IS (Intrinsically Safe), CAN (Cancelled), can (обечайка),
@@ -110,6 +142,12 @@ class TermMatcher:
         return resolved
 
     def _build_term_entry_map(self) -> dict[str, list[GlossaryEntry]]:
+        """Build a mapping from lemmatized term strings to their GlossaryEntry objects.
+
+        Returns:
+            A dict mapping lemmatized term strings to the list of GlossaryEntry
+            objects that contain that term.
+        """
         term_entry_map: dict[str, list[GlossaryEntry]] = dict()
         for entry in self.entries:
             for term in entry.terms:
@@ -125,6 +163,19 @@ class TermMatcher:
     def match(
         self, text: str, lang: Lang, lemmatizer: Lemmatizer | None = None
     ) -> list[GlossaryEntry]:
+        """Match glossary entries against the given text.
+
+        Lemmatizes the text, runs the Aho-Corasick automaton, resolves
+        overlaps, and returns the matched GlossaryEntry objects (deduplicated).
+
+        Args:
+            text: The raw text to search in.
+            lang: The language of the text.
+            lemmatizer: Optional lemmatizer instance. Defaults to a new Lemmatizer.
+
+        Returns:
+            A list of matched GlossaryEntry objects (deduplicated by entry ID).
+        """
         if lemmatizer is None:
             lemmatizer = Lemmatizer()
 
@@ -152,6 +203,14 @@ class TermMatcher:
 
 
 def example(lang: str) -> None:
+    """Demonstration: build a small glossary and match it against sample texts.
+
+    Args:
+        lang: Language code ('en' or 'ru') to select the sample text.
+
+    Raises:
+        ValueError: If lang is not 'en' or 'ru'.
+    """
     raw_terms: dict[tuple[str, ...], tuple[str, ...]] = {
         ("COMPANY", "CPY"): ("КОМПАНИЯ", "КОМП"),
         ("COMPANY MANUFACTURER",): ("КОМПАНИЯ ПРОИЗВОДИТЕЛЬ",),

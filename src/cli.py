@@ -1,3 +1,7 @@
+"""CLI entrypoint for the translation/review pipeline.
+
+Supports translation, review, glossary matching, and email webhook server modes."""
+
 import asyncio
 import sys
 from pathlib import Path
@@ -15,6 +19,16 @@ USAGE = (
 
 
 def _parse_glossary_args(args: list[str]) -> tuple[bool, Path | None, list[str]]:
+    """Parse --match-glossary and --match-output flags from CLI args.
+
+    Args:
+        args: Command-line argument list (excluding the program name).
+
+    Returns:
+        A tuple of (match_glossary, match_output_path, remaining_args).
+        Exits the process with an error message if --match-glossary is
+        present but --match-output is missing or has no value.
+    """
     match_glossary = False
     match_output_path: Path | None = None
 
@@ -36,6 +50,12 @@ def _parse_glossary_args(args: list[str]) -> tuple[bool, Path | None, list[str]]
 
 
 def cli() -> None:
+    """Main CLI entrypoint.
+
+    Dispatches to translation, review, glossary-matching, or email-server
+    modes based on the provided arguments. Exits with usage info when no
+    valid command is given.
+    """
     args = sys.argv[1:]
 
     if not args:

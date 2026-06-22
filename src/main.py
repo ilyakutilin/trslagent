@@ -1,3 +1,9 @@
+"""Pipeline orchestration: translation, review, and glossary matching.
+
+This module ties together chunking, glossary matching, LLM prompting,
+and cost resolution into a unified async pipeline driven by TOML config.
+"""
+
 import asyncio
 from dataclasses import dataclass
 
@@ -17,6 +23,29 @@ from iso639 import Lang
 
 @dataclass
 class PipelineResult:
+    """Holds the result of a translation or review pipeline run.
+
+    Attributes:
+        text: The final output text (translation or review feedback).
+        source_lang: Source language of the original text.
+        target_lang: Target language of the output.
+        source_chars: Character count of source text.
+        target_chars: Character count of output text.
+        chunk_count: Number of chunks the text was split into.
+        model: LLM model identifier used.
+        cost_total: Total cost of the run, or None if unavailable.
+        cost_currency: Currency code for the cost (e.g. "USD").
+        cost_unknowns: Number of chunks whose cost could not be resolved.
+        auto_glossary_entries_matched: Total auto-glossary entries matched across chunks.
+        user_glossary_entries: Number of user-supplied glossary entries.
+        specialized_in: Optional domain specialization.
+        doc_type: Optional document type.
+        doc_title: Optional document title.
+        auto_glossary_enabled: Whether auto glossary matching was active.
+        user_glossary_enabled: Whether a user glossary was provided.
+        mode: Pipeline mode — "translation" or "review".
+    """
+
     text: str
     source_lang: Lang
     target_lang: Lang
@@ -42,6 +71,16 @@ def _stringify_glossary(
     source_lang: Lang,
     target_lang: Lang,
 ) -> str:
+    """Converts glossary entries to a newline-delimited string for prompt inclusion.
+
+    Args:
+        entries: List of GlossaryEntry objects to stringify.
+        source_lang: Source language for term extraction.
+        target_lang: Target language for translation extraction.
+
+    Returns:
+        A newline-separated string of term-to-translation mappings.
+    """
     str_entries: list[str] = []
     for entry in entries:
         str_entry = entry.stringify(source_lang, target_lang)
@@ -55,6 +94,15 @@ def _parse_glossaries(
     cfg: Settings,
     lemmatizer: Lemmatizer,
 ) -> tuple[list[GlossaryEntry], list[GlossaryEntry]]:
+    """Parses auto and user glossaries from the given settings.
+
+    Args:
+        cfg: Application settings with glossary configuration.
+        lemmatizer: Lemmatizer instance for term normalization.
+
+    Returns:
+        A tuple of (auto_entries, user_entries).
+    """
     auto_entries: list[GlossaryEntry] = []
     if cfg.input_data.auto_glossary:
         auto_entries = AutoGlossaryParser(
@@ -81,6 +129,16 @@ def _deduplicate_entries(
     user_entries: list[GlossaryEntry],
     source_lang: Lang,
 ) -> tuple[list[GlossaryEntry], list[GlossaryEntry]]:
+    """Removes auto-matched entries that overlap with user-supplied glossary entries.
+
+    Args:
+        matched: Auto-matched glossary entries from the source text.
+        user_entries: User-supplied glossary entries (take precedence).
+        source_lang: Source language for comparing lemmatized terms.
+
+    Returns:
+        A tuple of (deduped_user_entries, deduped_auto_entries).
+    """
     lemmatized_user_terms: list[str] = []
     for ge in user_entries:
         for term in [t for t in ge.terms if t.language == source_lang]:
@@ -104,7 +162,22 @@ async def _resolve_and_log_cost(
     api_key: str,
     cfg: Settings,
 ) -> tuple[float | None, str, int]:
-    """Returns (total_cost_or_None, currency, unknown_count)."""
+    """Fetches and logs the total cost of all LLM completions.
+
+    Fetches costs concurrently for each completion ID via the generation info URL.
+    Logs warnings for failed fetches and returns aggregate totals.
+
+    Args:
+        completion_ids: List of LLM completion IDs to query cost for.
+        api_key: API key for authentication.
+        cfg: Application settings containing cost configuration.
+
+    Returns:
+        A tuple of (total_cost_or_None, currency, unknown_count), where
+        total_cost_or_None is the sum of known costs (None if all are unknown),
+        currency is the cost currency code, and unknown_count is the number of
+        completions whose cost could not be resolved.
+    """
     if not cfg.cost.generation_info_url:
         return None, cfg.cost.cost_currency, 0
     if not completion_ids:
@@ -140,6 +213,22 @@ async def _resolve_and_log_cost(
 
 
 async def main(cfg: Settings) -> PipelineResult | None:
+    """Runs the full translation or review pipeline.
+
+    Determines the mode (translation or review) based on whether target_text is set,
+    splits text into chunks, runs the LLM with glossary awareness, stitches results,
+    and resolves costs.
+
+    Args:
+        cfg: Application settings controlling all pipeline behavior.
+
+    Returns:
+        A PipelineResult with the output text and metadata, or None if LLM is unavailable
+        (print_prompt_only mode).
+
+    Raises:
+        ValueError: If source text is empty or chunk counts mismatch in review mode.
+    """
     resolve_languages(cfg)
     assert cfg.input_data.source_lang is not None
     assert cfg.input_data.target_lang is not None
@@ -210,6 +299,14 @@ async def main(cfg: Settings) -> PipelineResult | None:
             def _glossary_for_review_chunk(
                 chunk: str,
             ) -> tuple[list[GlossaryEntry], list[GlossaryEntry]]:
+                """Matches glossary terms in a review-mode source chunk.
+
+                Args:
+                    chunk: Source text chunk to match terms against.
+
+                Returns:
+                    A tuple of (user_entries, auto_entries) after deduplication.
+                """
                 nonlocal auto_matched_total
                 if term_matcher is not None:
                     matched = term_matcher.match(
@@ -245,6 +342,16 @@ async def main(cfg: Settings) -> PipelineResult | None:
             semaphore = asyncio.Semaphore(cfg.chunk.max_concurrent)
 
             async def _process_single_review_chunk(i, src_chunk, tgt_chunk):
+                """Processes a single review chunk pair with concurrency control.
+
+                Args:
+                    i: Chunk index for logging and delay decisions.
+                    src_chunk: Source text chunk.
+                    tgt_chunk: Target translation chunk.
+
+                Returns:
+                    The result of reviewer.review_text_async for this chunk pair.
+                """
                 if i > 0 and cfg.chunk.max_concurrent > 1:
                     await asyncio.sleep(cfg.chunk.delay_seconds)
                 async with semaphore:
@@ -420,6 +527,18 @@ async def main(cfg: Settings) -> PipelineResult | None:
         source_lang: Lang,
         lemmatizer: Lemmatizer,
     ) -> tuple[list[GlossaryEntry], list[GlossaryEntry]]:
+        """Matches glossary terms in a translation-mode text chunk.
+
+        Args:
+            chunk: Source text chunk to match terms against.
+            term_matcher: TermMatcher instance, or None if auto glossary is disabled.
+            user_entries: User-supplied glossary entries.
+            source_lang: Source language for matching.
+            lemmatizer: Lemmatizer for term normalization.
+
+        Returns:
+            A tuple of (user_entries, auto_entries) after deduplication.
+        """
         nonlocal auto_matched_total
         if term_matcher is not None:
             matched = term_matcher.match(
@@ -456,6 +575,15 @@ async def main(cfg: Settings) -> PipelineResult | None:
     async def _process_single_chunk(
         i: int, chunk: str
     ) -> tuple[str | None, str | None]:
+        """Processes a single translation chunk with concurrency control.
+
+        Args:
+            i: Chunk index for logging and delay decisions.
+            chunk: Source text chunk to translate.
+
+        Returns:
+            The result of translator.translate_chunk_async for this chunk.
+        """
         if i > 0 and cfg.chunk.max_concurrent > 1:
             await asyncio.sleep(cfg.chunk.delay_seconds)
 
@@ -529,6 +657,17 @@ async def main(cfg: Settings) -> PipelineResult | None:
 
 
 def export_glossary_matches(cfg: Settings) -> str:
+    """Matches glossary entries against source text and returns them as a formatted string.
+
+    Used by the --match-glossary CLI subcommand.
+
+    Args:
+        cfg: Application settings with input data and glossary configuration.
+
+    Returns:
+        A newline-separated string of all matched and user glossary entries,
+        or an empty string if no auto glossary is available.
+    """
     resolve_languages(cfg)
     assert cfg.input_data.source_lang is not None
     assert cfg.input_data.target_lang is not None

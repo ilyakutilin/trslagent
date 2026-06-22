@@ -1,3 +1,9 @@
+"""LLM client for translation and review via OpenRouter API.
+
+Provides an async OpenAI-compatible client with retry logic and a cost-fetching
+utility for completion generation metadata.
+"""
+
 import asyncio
 from typing import Any
 
@@ -10,6 +16,17 @@ from src.config import CostSettings, logger
 
 
 class LLM:
+    """Async wrapper around an OpenAI-compatible chat completions API.
+
+    Attributes:
+        base_url: Base URL of the API endpoint.
+        api_key: API key used for authentication.
+        model: Model identifier string (e.g. "openai/gpt-4o").
+        temperature: Sampling temperature (may be None for models that don't
+            support it).
+        reasoning_effort: Optional reasoning effort level for compatible models.
+    """
+
     def __init__(
         self,
         base_url: str,
@@ -18,6 +35,15 @@ class LLM:
         temperature: float | None,
         reasoning_effort: ReasoningEffort = None,
     ) -> None:
+        """Initialize the LLM client.
+
+        Args:
+            base_url: Base URL of the API endpoint.
+            api_key: API key for authentication.
+            model: Model identifier string.
+            temperature: Sampling temperature or None.
+            reasoning_effort: Optional reasoning effort level.
+        """
         self.base_url = base_url
         self.api_key = api_key
         self.model = model
@@ -27,6 +53,14 @@ class LLM:
         self._client_lock = asyncio.Lock()
 
     def _get_llm_client(self) -> OpenAI:
+        """Create and return a synchronous OpenAI client.
+
+        Returns:
+            Configured OpenAI client instance.
+
+        Raises:
+            ValueError: If no API key is set.
+        """
         if not self.api_key:
             raise ValueError("Set the OPENROUTER_API_KEY environment variable.")
         return OpenAI(
@@ -39,6 +73,24 @@ class LLM:
         system_prompt: str,
         user_prompt: str,
     ) -> tuple[str, str]:
+        """Send a chat completion request with retry logic.
+
+        Lazily initializes the underlying OpenAI client on first call.
+        Retries on timeout, rate-limit, and connection errors with exponential
+        backoff (up to 5 attempts).
+
+        Args:
+            system_prompt: System-level instruction for the model.
+            user_prompt: User-level content to process.
+
+        Returns:
+            A tuple of (response content, completion ID).
+
+        Raises:
+            RuntimeError: If all retries are exhausted for a transient error,
+                or if a non-retryable exception occurs.
+            ValueError: If the API returns an empty response content.
+        """
         if not self._client:
             async with self._client_lock:
                 if not self._client:
@@ -120,6 +172,16 @@ class LLM:
 
 
 def _find_key(obj: Any, key: str) -> Any:
+    """Recursively search for a key in a nested dict/list structure.
+
+    Args:
+        obj: A dict, list, or other value to search.
+        key: The dictionary key to look for.
+
+    Returns:
+        The value associated with *key* in the first matching dict, or None
+        if not found.
+    """
     if isinstance(obj, dict):
         if key in obj:
             return obj[key]
@@ -140,6 +202,20 @@ async def fetch_cost(
     api_key: str,
     cost_settings: CostSettings,
 ) -> float | None:
+    """Fetch the generation cost for a completion from the API.
+
+    Queries the configured generation info URL, extracts the cost value using
+    the key specified in *cost_settings*, and returns it as a float.
+
+    Args:
+        completion_id: The completion ID returned by the LLM.
+        api_key: API key for authentication (passed as Bearer token).
+        cost_settings: Configuration with the info URL and cost key.
+
+    Returns:
+        The cost as a float, or None if the fetch failed, the key was missing,
+        or the value is not numeric.
+    """
     if not cost_settings.generation_info_url:
         return None
     url = f"{cost_settings.generation_info_url}?id={completion_id}"
