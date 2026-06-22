@@ -14,7 +14,7 @@ from src.email_processor import (
     fetch_email_content,
     send_reply,
 )
-from src.main import main
+from src.main import main, PipelineResult
 
 SIGNATURE_TOLERANCE = 300  # 5 minutes
 
@@ -75,6 +75,47 @@ def _extract_sender(from_header: str) -> str:
     if "<" in from_header and ">" in from_header:
         return from_header.split("<")[1].split(">")[0].strip().lower()
     return from_header.strip().lower()
+
+
+def _build_info_block(result: PipelineResult) -> str:
+    def _fmt(val: object) -> str:
+        if val is None:
+            return "null"
+        if isinstance(val, bool):
+            return "true" if val else "false"
+        return str(val)
+
+    def _fmt_cost(total: float | None, currency: str, unknowns: int) -> str:
+        if total is None:
+            return "UNKNOWN"
+        if unknowns > 0:
+            return f"{total:.2f} {currency} ({unknowns} unknown)"
+        return f"{total:.2f} {currency}"
+
+    lines: list[str] = []
+    lines.append("Request settings:")
+    lines.append("")
+    lines.append(f"Source Lang: {result.source_lang.name}")
+    lines.append(f"Target Lang: {result.target_lang.name}")
+    lines.append(f"Specialized in: {_fmt(result.specialized_in)}")
+    lines.append(f"Doc Type: {_fmt(result.doc_type)}")
+    lines.append(f"Doc Title: {_fmt(result.doc_title)}")
+    lines.append(f"Auto Glossary: {_fmt(result.auto_glossary_enabled)}")
+    lines.append(f"User Glossary: {_fmt(result.user_glossary_enabled)}")
+    lines.append("")
+    lines.append("Usage Stats:")
+    lines.append("")
+    lines.append(f"Chunks: {result.chunk_count}")
+    lines.append(f"Source Chars: {result.source_chars}")
+    lines.append(f"Target Chars: {result.target_chars}")
+    lines.append(f"User Glossary Entries: {result.user_glossary_entries}")
+    lines.append(f"Auto Glossary Entries: {result.auto_glossary_entries_total}")
+    lines.append("")
+    lines.append(f"Model: {result.model}")
+    lines.append(
+        f"Cost: {_fmt_cost(result.cost_total, result.cost_currency, result.cost_unknowns)}"
+    )
+    return "\n".join(lines)
 
 
 async def _handle_webhook(request: web.Request, cfg: Settings) -> web.Response:
@@ -225,7 +266,7 @@ async def _process_inbound(
         )
         return
 
-    if not result:
+    if result is None or not result.text:
         await _send_error_reply(
             sender=sender,
             subject=subject,
@@ -237,10 +278,12 @@ async def _process_inbound(
         return
 
     try:
+        info_block = _build_info_block(result)
+        body = f"{result.text}\n\n====================\n\n{info_block}"
         await send_reply(
             to=sender,
             subject=subject,
-            body=result,
+            body=body,
             message_id=message_id,
             from_address=email_settings.from_address,
             api_key=api_key,

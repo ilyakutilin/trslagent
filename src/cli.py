@@ -73,7 +73,11 @@ def cli() -> None:
             f.write(result)
         return
 
-    translation = asyncio.run(main(cfg=settings))
+    pipeline_result = asyncio.run(main(cfg=settings))
+    if pipeline_result is not None:
+        translation = pipeline_result.text
+    else:
+        translation = None
     if translation:
         result_path = settings.output_data.get_result_file_path()
         with open(result_path, "w", encoding="utf-8") as f:

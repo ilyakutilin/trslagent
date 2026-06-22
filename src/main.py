@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import dataclass
 
 from src.config import Settings, logger
 from src.glossary.matcher import TermMatcher
@@ -12,6 +13,28 @@ from src.splitter import split_by_divider, split_text, stitch_chunks
 from src.translator import Translator
 
 from iso639 import Lang
+
+
+@dataclass
+class PipelineResult:
+    text: str
+    source_lang: Lang
+    target_lang: Lang
+    source_chars: int
+    target_chars: int
+    chunk_count: int
+    model: str
+    cost_total: float | None
+    cost_currency: str
+    cost_unknowns: int
+    auto_glossary_entries_total: int
+    user_glossary_entries: int
+    specialized_in: str | None
+    doc_type: str | None
+    doc_title: str | None
+    auto_glossary_enabled: bool
+    user_glossary_enabled: bool
+    mode: str
 
 
 def _stringify_glossary(
@@ -80,11 +103,12 @@ async def _resolve_and_log_cost(
     completion_ids: list[str],
     api_key: str,
     cfg: Settings,
-) -> None:
+) -> tuple[float | None, str, int]:
+    """Returns (total_cost_or_None, currency, unknown_count)."""
     if not cfg.cost.generation_info_url:
-        return
+        return None, cfg.cost.cost_currency, 0
     if not completion_ids:
-        return
+        return None, cfg.cost.cost_currency, 0
 
     cost_tasks = [fetch_cost(cid, api_key, cfg.cost) for cid in completion_ids]
     cost_results = await asyncio.gather(*cost_tasks, return_exceptions=True)
@@ -103,6 +127,7 @@ async def _resolve_and_log_cost(
     known_total = sum(known_costs) if known_costs else 0.0
     if unknown_count > 0 and not known_costs:
         logger.info("Cost: UNKNOWN")
+        return None, cfg.cost.cost_currency, unknown_count
     elif unknown_count > 0:
         logger.info(
             f"Cost: {known_total:.2f} {cfg.cost.cost_currency}"
@@ -111,8 +136,10 @@ async def _resolve_and_log_cost(
     else:
         logger.info(f"Cost: {known_total:.2f} {cfg.cost.cost_currency}")
 
+    return known_total if known_costs else None, cfg.cost.cost_currency, unknown_count
 
-async def main(cfg: Settings) -> str | None:
+
+async def main(cfg: Settings) -> PipelineResult | None:
     resolve_languages(cfg)
     assert cfg.input_data.source_lang is not None
     assert cfg.input_data.target_lang is not None
@@ -127,6 +154,11 @@ async def main(cfg: Settings) -> str | None:
     lemmatizer = Lemmatizer()
 
     auto_glossary_entries, user_glossary_entries = _parse_glossaries(cfg, lemmatizer)
+
+    auto_glossary_enabled = cfg.input_data.auto_glossary
+    user_glossary_enabled = bool(cfg.input_data.user_glossary_lines)
+    auto_glossary_entries_total = len(auto_glossary_entries)
+    user_glossary_entry_count = len(user_glossary_entries)
 
     llm = None
     if not cfg.output_data.print_prompt_only:
@@ -257,9 +289,30 @@ async def main(cfg: Settings) -> str | None:
             )
 
             api_key = cfg.llm.api_key.get_secret_value()
-            await _resolve_and_log_cost(completion_ids, api_key, cfg)
+            cost_total, _, cost_unknowns = await _resolve_and_log_cost(
+                completion_ids, api_key, cfg
+            )
 
-            return result
+            return PipelineResult(
+                text=result or "",
+                source_lang=source_lang,
+                target_lang=target_lang,
+                source_chars=len(source_text),
+                target_chars=len(target_text),
+                chunk_count=len(src_chunks),
+                model=cfg.llm.model,
+                cost_total=cost_total,
+                cost_currency=cfg.cost.cost_currency,
+                cost_unknowns=cost_unknowns,
+                auto_glossary_entries_total=auto_glossary_entries_total,
+                user_glossary_entries=user_glossary_entry_count,
+                specialized_in=cfg.input_data.specialized_in,
+                doc_type=cfg.input_data.doc_type,
+                doc_title=cfg.input_data.doc_title,
+                auto_glossary_enabled=auto_glossary_enabled,
+                user_glossary_enabled=user_glossary_enabled,
+                mode="review",
+            )
 
         if auto_glossary_entries:
             term_matcher = TermMatcher(glossary_entries=auto_glossary_entries)
@@ -302,9 +355,30 @@ async def main(cfg: Settings) -> str | None:
             f"result={len(result) if result else 0} chars"
         )
 
-        await _resolve_and_log_cost(completion_ids, api_key, cfg)
+        cost_total, _, cost_unknowns = await _resolve_and_log_cost(
+            completion_ids, api_key, cfg
+        )
 
-        return result
+        return PipelineResult(
+            text=result or "",
+            source_lang=source_lang,
+            target_lang=target_lang,
+            source_chars=len(source_text),
+            target_chars=len(target_text),
+            chunk_count=1,
+            model=cfg.llm.model,
+            cost_total=cost_total,
+            cost_currency=cfg.cost.cost_currency,
+            cost_unknowns=cost_unknowns,
+            auto_glossary_entries_total=auto_glossary_entries_total,
+            user_glossary_entries=user_glossary_entry_count,
+            specialized_in=cfg.input_data.specialized_in,
+            doc_type=cfg.input_data.doc_type,
+            doc_title=cfg.input_data.doc_title,
+            auto_glossary_enabled=auto_glossary_enabled,
+            user_glossary_enabled=user_glossary_enabled,
+            mode="review",
+        )
 
     translator = Translator(
         source_lang=cfg.input_data.source_lang,
@@ -423,9 +497,30 @@ async def main(cfg: Settings) -> str | None:
     logger.info(f"Translation complete: {len(text)} -> {len(result)} characters")
 
     api_key = cfg.llm.api_key.get_secret_value()
-    await _resolve_and_log_cost(completion_ids, api_key, cfg)
+    cost_total, _, cost_unknowns = await _resolve_and_log_cost(
+        completion_ids, api_key, cfg
+    )
 
-    return result
+    return PipelineResult(
+        text=result or "",
+        source_lang=source_lang,
+        target_lang=target_lang,
+        source_chars=len(text),
+        target_chars=len(result),
+        chunk_count=len(chunks),
+        model=cfg.llm.model,
+        cost_total=cost_total,
+        cost_currency=cfg.cost.cost_currency,
+        cost_unknowns=cost_unknowns,
+        auto_glossary_entries_total=auto_glossary_entries_total,
+        user_glossary_entries=user_glossary_entry_count,
+        specialized_in=cfg.input_data.specialized_in,
+        doc_type=cfg.input_data.doc_type,
+        doc_title=cfg.input_data.doc_title,
+        auto_glossary_enabled=auto_glossary_enabled,
+        user_glossary_enabled=user_glossary_enabled,
+        mode="translation",
+    )
 
 
 def export_glossary_matches(cfg: Settings) -> str:
