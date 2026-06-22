@@ -109,7 +109,7 @@ def _build_info_block(result: PipelineResult) -> str:
     lines.append(f"Source Chars: {result.source_chars}")
     lines.append(f"Target Chars: {result.target_chars}")
     lines.append(f"User Glossary Entries: {result.user_glossary_entries}")
-    lines.append(f"Auto Glossary Entries: {result.auto_glossary_entries_total}")
+    lines.append(f"Auto Glossary Entries: {result.auto_glossary_entries_matched}")
     lines.append("")
     lines.append(f"Model: {result.model}")
     lines.append(

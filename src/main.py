@@ -27,7 +27,7 @@ class PipelineResult:
     cost_total: float | None
     cost_currency: str
     cost_unknowns: int
-    auto_glossary_entries_total: int
+    auto_glossary_entries_matched: int
     user_glossary_entries: int
     specialized_in: str | None
     doc_type: str | None
@@ -157,7 +157,7 @@ async def main(cfg: Settings) -> PipelineResult | None:
 
     auto_glossary_enabled = cfg.input_data.auto_glossary
     user_glossary_enabled = bool(cfg.input_data.user_glossary_lines)
-    auto_glossary_entries_total = len(auto_glossary_entries)
+    auto_matched_total = 0
     user_glossary_entry_count = len(user_glossary_entries)
 
     llm = None
@@ -210,10 +210,12 @@ async def main(cfg: Settings) -> PipelineResult | None:
             def _glossary_for_review_chunk(
                 chunk: str,
             ) -> tuple[list[GlossaryEntry], list[GlossaryEntry]]:
+                nonlocal auto_matched_total
                 if term_matcher is not None:
                     matched = term_matcher.match(
                         text=chunk, lang=source_lang, lemmatizer=lemmatizer
                     )
+                    auto_matched_total += len(matched)
                     return _deduplicate_entries(
                         matched, user_glossary_entries, source_lang
                     )
@@ -304,7 +306,7 @@ async def main(cfg: Settings) -> PipelineResult | None:
                 cost_total=cost_total,
                 cost_currency=cfg.cost.cost_currency,
                 cost_unknowns=cost_unknowns,
-                auto_glossary_entries_total=auto_glossary_entries_total,
+                auto_glossary_entries_matched=auto_matched_total,
                 user_glossary_entries=user_glossary_entry_count,
                 specialized_in=cfg.input_data.specialized_in,
                 doc_type=cfg.input_data.doc_type,
@@ -321,6 +323,7 @@ async def main(cfg: Settings) -> PipelineResult | None:
                 lang=source_lang,
                 lemmatizer=lemmatizer,
             )
+            auto_matched_total = len(matched)
             review_user_entries, review_auto_entries = _deduplicate_entries(
                 matched, user_glossary_entries, source_lang
             )
@@ -370,7 +373,7 @@ async def main(cfg: Settings) -> PipelineResult | None:
             cost_total=cost_total,
             cost_currency=cfg.cost.cost_currency,
             cost_unknowns=cost_unknowns,
-            auto_glossary_entries_total=auto_glossary_entries_total,
+            auto_glossary_entries_matched=auto_matched_total,
             user_glossary_entries=user_glossary_entry_count,
             specialized_in=cfg.input_data.specialized_in,
             doc_type=cfg.input_data.doc_type,
@@ -417,12 +420,14 @@ async def main(cfg: Settings) -> PipelineResult | None:
         source_lang: Lang,
         lemmatizer: Lemmatizer,
     ) -> tuple[list[GlossaryEntry], list[GlossaryEntry]]:
+        nonlocal auto_matched_total
         if term_matcher is not None:
             matched = term_matcher.match(
                 text=chunk,
                 lang=source_lang,
                 lemmatizer=lemmatizer,
             )
+            auto_matched_total += len(matched)
             return _deduplicate_entries(matched, user_entries, source_lang)
         return user_entries.copy(), []
 
@@ -512,7 +517,7 @@ async def main(cfg: Settings) -> PipelineResult | None:
         cost_total=cost_total,
         cost_currency=cfg.cost.cost_currency,
         cost_unknowns=cost_unknowns,
-        auto_glossary_entries_total=auto_glossary_entries_total,
+        auto_glossary_entries_matched=auto_matched_total,
         user_glossary_entries=user_glossary_entry_count,
         specialized_in=cfg.input_data.specialized_in,
         doc_type=cfg.input_data.doc_type,
