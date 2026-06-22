@@ -224,6 +224,10 @@ class InputData(BaseModel):
     doc_title: str | None = Field(
         default=None, description="Document title. Fed into the system prompt"
     )
+    additional_instructions: str | None = Field(
+        default=None,
+        description="Additional instructions for the LLM. Appended to the system prompt",
+    )
     source_file_path: Path = Field(
         default=Path("files/source.txt"),
         description=(

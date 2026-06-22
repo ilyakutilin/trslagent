@@ -142,6 +142,27 @@ class TestInputData:
         )
         assert data.source_text is None
 
+    def test_additional_instructions_default_is_none(self, tmp_path):
+        fp = tmp_path / "source.txt"
+        fp.write_text("source")
+        data = InputData(
+            source_lang=Lang("en"),
+            target_lang=Lang("ru"),
+            source_file_path=fp,
+        )
+        assert data.additional_instructions is None
+
+    def test_additional_instructions_accepted(self, tmp_path):
+        fp = tmp_path / "source.txt"
+        fp.write_text("source")
+        data = InputData(
+            source_lang=Lang("en"),
+            target_lang=Lang("ru"),
+            source_file_path=fp,
+            additional_instructions="Be precise.",
+        )
+        assert data.additional_instructions == "Be precise."
+
 
 class TestOutputData:
     FROZEN_NOW = datetime.datetime(2025, 1, 15, 12, 30, 45)

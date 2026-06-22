@@ -14,6 +14,7 @@ def translator(en_lang: Lang, ru_lang: Lang) -> Translator:
         specialized_in=None,
         doc_type=None,
         doc_title=None,
+        additional_instructions=None,
         llm=None,
     )
 
@@ -131,6 +132,25 @@ class TestBuildSystemPrompt:
         assert "flow meter" in result
         assert "pressure valve" in result
 
+    def test_with_additional_instructions(self, translator: Translator):
+        translator.additional_instructions = "Preserve all formatting."
+        result = translator._build_system_prompt(
+            is_extract=False,
+            user_glossary_str="",
+            auto_glossary_str="",
+        )
+        assert "Additional instructions from the user:" in result
+        assert "Preserve all formatting." in result
+
+    def test_without_additional_instructions(self, translator: Translator):
+        translator.additional_instructions = None
+        result = translator._build_system_prompt(
+            is_extract=False,
+            user_glossary_str="",
+            auto_glossary_str="",
+        )
+        assert "Additional instructions from the user:" not in result
+
 
 class TestBuildUserPrompt:
     def test_wraps_text_correctly(self, translator: Translator, sample_text: str):
@@ -153,6 +173,7 @@ class TestTranslateChunkAsync:
             specialized_in=None,
             doc_type=None,
             doc_title=None,
+            additional_instructions=None,
             llm=mock_llm,
         )
 
@@ -227,3 +248,18 @@ class TestTranslateChunkAsync:
         )
         call_kwargs = mock_llm.get_reply_async.call_args.kwargs
         assert "an extract from" in call_kwargs["system_prompt"]
+
+    @pytest.mark.asyncio
+    async def test_additional_instructions_passed_to_llm(
+        self, translator_with_llm: Translator, sample_text: str, mock_llm: AsyncMock
+    ):
+        translator_with_llm.additional_instructions = "Keep it concise."
+        await translator_with_llm.translate_chunk_async(
+            chunk=sample_text,
+            user_glossary_str="",
+            auto_glossary_str="",
+            is_extract=False,
+        )
+        call_kwargs = mock_llm.get_reply_async.call_args.kwargs
+        assert "Additional instructions from the user:" in call_kwargs["system_prompt"]
+        assert "Keep it concise." in call_kwargs["system_prompt"]

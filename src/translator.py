@@ -23,6 +23,7 @@ class Translator:
         specialized_in: Optional domain specialization for translator persona
         doc_type: Optional document type for context
         doc_title: Optional document title for context
+        additional_instructions: Optional extra instructions for the LLM
         llm: LLM instance for generating translations. If None, will only output prompts
     """
 
@@ -33,6 +34,7 @@ class Translator:
         specialized_in: str | None,
         doc_type: str | None,
         doc_title: str | None,
+        additional_instructions: str | None,
         llm: LLM | None,
     ) -> None:
         self.source_lang = source_lang
@@ -40,6 +42,7 @@ class Translator:
         self.specialized_in = specialized_in
         self.doc_type = doc_type
         self.doc_title = doc_title
+        self.additional_instructions = additional_instructions
         self.llm = llm
 
         logger.info(
@@ -104,6 +107,8 @@ class Translator:
             f"{text_description_section}"
             f"{glossary_section}"
         )
+        if self.additional_instructions:
+            result += f"\nAdditional instructions from the user:\n{self.additional_instructions}"
         logger.debug(f"Built system prompt: {result}")
         return result
 

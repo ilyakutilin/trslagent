@@ -141,6 +141,7 @@ def _build_info_block(result: PipelineResult) -> str:
     lines.append(f"Specialized in: {_fmt(result.specialized_in)}")
     lines.append(f"Doc Type: {_fmt(result.doc_type)}")
     lines.append(f"Doc Title: {_fmt(result.doc_title)}")
+    lines.append(f"Additional Instructions: {_fmt(result.additional_instructions)}")
     lines.append(f"Auto Glossary: {_fmt(result.auto_glossary_enabled)}")
     lines.append(f"User Glossary: {_fmt(result.user_glossary_enabled)}")
     lines.append("")

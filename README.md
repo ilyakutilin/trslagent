@@ -95,11 +95,12 @@ All sections and their keys:
 
 | Section       | Key                            | Default                                 | Description                                            |
 | ------------- | ------------------------------ | --------------------------------------- | ------------------------------------------------------ |
-| `input_data`  | `source_lang`                  | auto-detected                           | ISO 639-1 code or full name (optional)                |
-|               | `target_lang`                  | auto-detected / defaulted               | ISO 639-1 code or full name (optional)                |
+| `input_data`  | `source_lang`                  | auto-detected                           | ISO 639-1 code or full name (optional)                 |
+|               | `target_lang`                  | auto-detected / defaulted               | ISO 639-1 code or full name (optional)                 |
 |               | `specialized_in`               | —                                       | Domain expertise for system prompt                     |
 |               | `doc_type`                     | —                                       | e.g. `"letter"`, `"procedure"`                         |
 |               | `doc_title`                    | —                                       | Document title for prompt context                      |
+|               | `additional_instructions`      | —                                       | Extra instructions for the LLM system prompt           |
 |               | `source_file_path`             | `"files/source.txt"`                    | Input text file                                        |
 |               | `target_file_path`             | —                                       | Set to enable **review mode**                          |
 |               | `auto_glossary`                | `false`                                 | Match auto glossary against source                     |

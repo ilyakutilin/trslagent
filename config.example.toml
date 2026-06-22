@@ -4,6 +4,7 @@ target_lang = "ru"
 # specialized_in = "technical and contractual translation"
 # doc_type = "letter"
 # doc_title = "Construction Constraints"
+# additional_instructions = "Preserve all formatting and structure."
 source_file_path = "files/source.txt"
 # target_file_path = "files/target.txt"
 # auto_glossary = true

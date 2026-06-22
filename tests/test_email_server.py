@@ -44,6 +44,7 @@ def _make_pipeline_result(text: str) -> MagicMock:
     pr.specialized_in = "tech"
     pr.doc_type = "manual"
     pr.doc_title = "Test Doc"
+    pr.additional_instructions = "custom hint"
     pr.auto_glossary_enabled = True
     pr.user_glossary_enabled = True
     pr.mode = "translation"
@@ -745,6 +746,7 @@ class TestBuildInfoBlock:
             specialized_in="tech",
             doc_type="manual",
             doc_title="Test Doc",
+            additional_instructions="custom hint",
             auto_glossary_enabled=True,
             user_glossary_enabled=True,
             mode="translation",
@@ -757,6 +759,7 @@ class TestBuildInfoBlock:
         assert "Specialized in: tech" in info
         assert "Doc Type: manual" in info
         assert "Doc Title: Test Doc" in info
+        assert "Additional Instructions: custom hint" in info
         assert "Auto Glossary: true" in info
         assert "User Glossary: true" in info
         assert "Chunks: 2" in info
@@ -786,6 +789,7 @@ class TestBuildInfoBlock:
             specialized_in=None,
             doc_type=None,
             doc_title=None,
+            additional_instructions=None,
             auto_glossary_enabled=False,
             user_glossary_enabled=False,
             mode="translation",
@@ -794,6 +798,7 @@ class TestBuildInfoBlock:
         assert "Specialized in: null" in info
         assert "Doc Type: null" in info
         assert "Doc Title: null" in info
+        assert "Additional Instructions: null" in info
 
     def test_cost_unknowns(self):
         from iso639 import Lang
@@ -814,6 +819,7 @@ class TestBuildInfoBlock:
             specialized_in=None,
             doc_type=None,
             doc_title=None,
+            additional_instructions=None,
             auto_glossary_enabled=False,
             user_glossary_enabled=False,
             mode="translation",
@@ -840,6 +846,7 @@ class TestBuildInfoBlock:
             specialized_in=None,
             doc_type=None,
             doc_title=None,
+            additional_instructions=None,
             auto_glossary_enabled=False,
             user_glossary_enabled=False,
             mode="translation",

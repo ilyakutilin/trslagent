@@ -41,6 +41,7 @@ class PipelineResult:
         specialized_in: Optional domain specialization.
         doc_type: Optional document type.
         doc_title: Optional document title.
+        additional_instructions: Optional extra instructions for the LLM.
         auto_glossary_enabled: Whether auto glossary matching was active.
         user_glossary_enabled: Whether a user glossary was provided.
         mode: Pipeline mode — "translation" or "review".
@@ -61,6 +62,7 @@ class PipelineResult:
     specialized_in: str | None
     doc_type: str | None
     doc_title: str | None
+    additional_instructions: str | None
     auto_glossary_enabled: bool
     user_glossary_enabled: bool
     mode: str
@@ -266,6 +268,7 @@ async def main(cfg: Settings) -> PipelineResult | None:
             specialized_in=cfg.input_data.specialized_in,
             doc_type=cfg.input_data.doc_type,
             doc_title=cfg.input_data.doc_title,
+            additional_instructions=cfg.input_data.additional_instructions,
             llm=llm,
         )
 
@@ -418,6 +421,7 @@ async def main(cfg: Settings) -> PipelineResult | None:
                 specialized_in=cfg.input_data.specialized_in,
                 doc_type=cfg.input_data.doc_type,
                 doc_title=cfg.input_data.doc_title,
+                additional_instructions=cfg.input_data.additional_instructions,
                 auto_glossary_enabled=auto_glossary_enabled,
                 user_glossary_enabled=user_glossary_enabled,
                 mode="review",
@@ -485,6 +489,7 @@ async def main(cfg: Settings) -> PipelineResult | None:
             specialized_in=cfg.input_data.specialized_in,
             doc_type=cfg.input_data.doc_type,
             doc_title=cfg.input_data.doc_title,
+            additional_instructions=cfg.input_data.additional_instructions,
             auto_glossary_enabled=auto_glossary_enabled,
             user_glossary_enabled=user_glossary_enabled,
             mode="review",
@@ -496,6 +501,7 @@ async def main(cfg: Settings) -> PipelineResult | None:
         specialized_in=cfg.input_data.specialized_in,
         doc_type=cfg.input_data.doc_type,
         doc_title=cfg.input_data.doc_title,
+        additional_instructions=cfg.input_data.additional_instructions,
         llm=llm,
     )
 
@@ -650,6 +656,7 @@ async def main(cfg: Settings) -> PipelineResult | None:
         specialized_in=cfg.input_data.specialized_in,
         doc_type=cfg.input_data.doc_type,
         doc_title=cfg.input_data.doc_title,
+        additional_instructions=cfg.input_data.additional_instructions,
         auto_glossary_enabled=auto_glossary_enabled,
         user_glossary_enabled=user_glossary_enabled,
         mode="translation",
