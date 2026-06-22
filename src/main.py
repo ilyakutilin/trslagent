@@ -117,6 +117,13 @@ async def main(cfg: Settings) -> str | None:
     assert cfg.input_data.source_lang is not None
     assert cfg.input_data.target_lang is not None
 
+    if not cfg.input_data.source_text:
+        raise ValueError(
+            "Source text is empty. "
+            "Provide it via source_file_path, source_text, or set it "
+            "programmatically before calling main()."
+        )
+
     lemmatizer = Lemmatizer()
 
     auto_glossary_entries, user_glossary_entries = _parse_glossaries(cfg, lemmatizer)

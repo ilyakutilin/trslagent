@@ -258,13 +258,15 @@ class InputData(BaseModel):
             try:
                 self.source_text = read_str_from_file(fp=self.source_file_path)
             except (IOError, OSError, UnicodeDecodeError) as e:
-                raise ValueError(f"Failed to read {self.source_file_path}: {e}")
+                logger.warning("Failed to read {}: {}", self.source_file_path, e)
+                self.source_text = None
 
         if self.target_text is None and self.target_file_path is not None:
             try:
                 self.target_text = read_str_from_file(fp=self.target_file_path)
             except (IOError, OSError, UnicodeDecodeError) as e:
-                raise ValueError(f"Failed to read {self.target_file_path}: {e}")
+                logger.warning("Failed to read {}: {}", self.target_file_path, e)
+                self.target_text = None
 
         if (
             self.user_glossary_lines is None
@@ -275,7 +277,12 @@ class InputData(BaseModel):
                     fp=self.user_glossary_file_path
                 )
             except (IOError, OSError, UnicodeDecodeError) as e:
-                raise ValueError(f"Failed to read {self.user_glossary_file_path}: {e}")
+                logger.warning(
+                    "Failed to read {}: {}",
+                    self.user_glossary_file_path,
+                    e,
+                )
+                self.user_glossary_lines = None
 
         return self
 
