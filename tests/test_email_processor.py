@@ -274,6 +274,16 @@ class TestPatchTomlForAttachments:
         assert "size = 5000" in result
         assert "max_concurrent = 5" in result
 
+    def test_handles_boolean_values(self):
+        toml = "[input_data]\n" + SRC_TRG_TOML + "auto_glossary = true\n"
+        result = _patch_toml_for_attachments(toml, None, None, None)
+        assert "auto_glossary = true" in result
+
+    def test_handles_boolean_false_value(self):
+        toml = "[input_data]\n" + SRC_TRG_TOML + "auto_glossary = false\n"
+        result = _patch_toml_for_attachments(toml, None, None, None)
+        assert "auto_glossary = false" in result
+
 
 class TestBuildSettingsFromEmail:
     def test_with_source_txt_attachment(self):

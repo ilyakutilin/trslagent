@@ -176,7 +176,8 @@ class TestTranslationPipeline:
         )
 
         result = await main(cfg)
-        assert result == "Переведённый текст"
+        assert result is not None
+        assert result.text == "Переведённый текст"
         mock_llm.get_reply_async.assert_called()
 
     @pytest.mark.asyncio
@@ -202,7 +203,8 @@ class TestTranslationPipeline:
         )
 
         result = await main(cfg)
-        assert result == "Перевод"
+        assert result is not None
+        assert result.text == "Перевод"
         mock_llm.get_reply_async.assert_called()
 
     @pytest.mark.asyncio
@@ -230,8 +232,8 @@ class TestTranslationPipeline:
 
         result = await main(cfg)
         assert result is not None
-        assert "Chunk 1" in result
-        assert "Chunk 2" in result
+        assert "Chunk 1" in result.text
+        assert "Chunk 2" in result.text
 
 
 class TestReviewMode:
@@ -255,7 +257,8 @@ class TestReviewMode:
         )
 
         result = await main(cfg)
-        assert result == "Review result"
+        assert result is not None
+        assert result.text == "Review result"
 
     @pytest.mark.asyncio
     async def test_divider_review_equal_chunks(self, mocker):
@@ -285,8 +288,8 @@ class TestReviewMode:
 
         result = await main(cfg)
         assert result is not None
-        assert "Review 1" in result
-        assert "Review 2" in result
+        assert "Review 1" in result.text
+        assert "Review 2" in result.text
 
     @pytest.mark.asyncio
     async def test_divider_review_mismatch_raises(self, mocker):
@@ -357,10 +360,11 @@ class TestChunkFailure:
 
         result = await main(cfg)
         assert result is not None
-        success_count = result.count("Chunk")
-        assert "Chunk 1 OK" in result
-        assert "Chunk 3 OK" in result
-        assert "Chunk 2" not in result
+        text = result.text
+        success_count = text.count("Chunk")
+        assert "Chunk 1 OK" in text
+        assert "Chunk 3 OK" in text
+        assert "Chunk 2" not in text
         assert success_count == 2
 
 
@@ -494,6 +498,241 @@ class TestResolveAndLogCost:
         await _resolve_and_log_cost([], "test-key", cfg)
         mock_fetch.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_returns_tuple_with_known_costs(self, mocker):
+        mocker.patch("src.main.fetch_cost", side_effect=[1.50, 2.50])
+
+        cfg = Settings(
+            input_data=InputData(
+                source_lang=Lang("en"),
+                target_lang=Lang("ru"),
+                source_text="x",
+            ),
+            cost=CostSettings(generation_info_url="https://api.example.com/cost"),
+        )
+
+        total, currency, unknowns = await _resolve_and_log_cost(
+            ["id-1", "id-2"], "test-key", cfg
+        )
+        assert total == 4.0
+        assert currency == "USD"
+        assert unknowns == 0
+
+    @pytest.mark.asyncio
+    async def test_returns_none_total_with_all_unknown(self, mocker):
+        mocker.patch("src.main.fetch_cost", side_effect=[None, None])
+
+        cfg = Settings(
+            input_data=InputData(
+                source_lang=Lang("en"),
+                target_lang=Lang("ru"),
+                source_text="x",
+            ),
+            cost=CostSettings(generation_info_url="https://api.example.com/cost"),
+        )
+
+        total, currency, unknowns = await _resolve_and_log_cost(
+            ["id-1", "id-2"], "test-key", cfg
+        )
+        assert total is None
+        assert currency == "USD"
+        assert unknowns == 2
+
+    @pytest.mark.asyncio
+    async def test_returns_total_only_for_known(self, mocker):
+        mocker.patch("src.main.fetch_cost", side_effect=[1.50, None])
+
+        cfg = Settings(
+            input_data=InputData(
+                source_lang=Lang("en"),
+                target_lang=Lang("ru"),
+                source_text="x",
+            ),
+            cost=CostSettings(generation_info_url="https://api.example.com/cost"),
+        )
+
+        total, _, unknowns = await _resolve_and_log_cost(
+            ["id-1", "id-2"], "test-key", cfg
+        )
+        assert total == 1.50
+        assert unknowns == 1
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_url(self, mocker):
+        mock_fetch = mocker.patch("src.main.fetch_cost")
+
+        cfg = Settings(
+            input_data=InputData(
+                source_lang=Lang("en"),
+                target_lang=Lang("ru"),
+                source_text="x",
+            ),
+            cost=CostSettings(generation_info_url=None),
+        )
+
+        total, currency, unknowns = await _resolve_and_log_cost(
+            ["id-1"], "test-key", cfg
+        )
+        mock_fetch.assert_not_called()
+        assert total is None
+        assert currency == "USD"
+        assert unknowns == 0
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_empty_ids(self, mocker):
+        mock_fetch = mocker.patch("src.main.fetch_cost")
+
+        cfg = Settings(
+            input_data=InputData(
+                source_lang=Lang("en"),
+                target_lang=Lang("ru"),
+                source_text="x",
+            ),
+            cost=CostSettings(generation_info_url="https://api.example.com/cost"),
+        )
+
+        total, _, _ = await _resolve_and_log_cost([], "test-key", cfg)
+        mock_fetch.assert_not_called()
+        assert total is None
+
+
+class TestPipelineResult:
+    @pytest.mark.asyncio
+    async def test_auto_glossary_matched_count(self, mocker):
+        en_lang = Lang("en")
+        ru_lang = Lang("ru")
+        auto_entries = [
+            _make_entry(
+                1,
+                "pressure valve",
+                "клапан давления",
+                "pressure valve",
+                "клапан давления",
+            ),
+        ]
+        user_entries = [
+            _make_entry(10, "flow meter", "расходомер", "flow meter", "расходомер")
+        ]
+        mocker.patch(
+            "src.main._parse_glossaries", return_value=(auto_entries, user_entries)
+        )
+        mocker.patch("src.main.fetch_cost")
+
+        mock_llm = AsyncMock()
+        mock_llm.get_reply_async.return_value = ("Перевод", "completion-1")
+        mocker.patch("src.main.LLM", return_value=mock_llm)
+
+        mock_matcher = mocker.patch("src.main.TermMatcher")
+        mock_matcher_instance = mock_matcher.return_value
+        mock_matcher_instance.match.return_value = [auto_entries[0]]
+
+        cfg = Settings(
+            llm=LLMSettings(api_key=SecretStr("test-key")),
+            input_data=InputData(
+                source_lang=en_lang,
+                target_lang=ru_lang,
+                source_text="The pressure valve is broken.",
+            ),
+            chunk=ChunkSettings(size=1000, max_concurrent=1, delay_seconds=0),
+        )
+
+        result = await main(cfg)
+        assert result is not None
+        assert result.auto_glossary_entries_matched == 1
+        assert result.user_glossary_entries == 1
+        assert result.mode == "translation"
+
+    @pytest.mark.asyncio
+    async def test_mode_is_review_when_target_provided(self, mocker):
+        mocker.patch("src.main._parse_glossaries", return_value=([], []))
+        mocker.patch("src.main.fetch_cost")
+
+        mock_llm = AsyncMock()
+        mock_llm.get_reply_async.return_value = ("Review result", "id-1")
+        mocker.patch("src.main.LLM", return_value=mock_llm)
+
+        cfg = Settings(
+            llm=LLMSettings(api_key=SecretStr("test-key")),
+            input_data=InputData(
+                source_lang=Lang("en"),
+                target_lang=Lang("ru"),
+                source_text="Hello world.",
+                target_text="Привет мир.",
+            ),
+        )
+
+        result = await main(cfg)
+        assert result is not None
+        assert result.mode == "review"
+
+    @pytest.mark.asyncio
+    async def test_user_glossary_enabled_flag(self, mocker):
+        user_entries = [
+            _make_entry(10, "flow meter", "расходомер", "flow meter", "расходомер")
+        ]
+        mocker.patch("src.main._parse_glossaries", return_value=([], user_entries))
+        mocker.patch("src.main.fetch_cost")
+
+        mock_llm = AsyncMock()
+        mock_llm.get_reply_async.return_value = ("Перевод", "completion-1")
+        mocker.patch("src.main.LLM", return_value=mock_llm)
+
+        cfg = Settings(
+            llm=LLMSettings(api_key=SecretStr("test-key")),
+            input_data=InputData(
+                source_lang=Lang("en"),
+                target_lang=Lang("ru"),
+                source_text="Hello.",
+                user_glossary_lines=["term = translation"],
+            ),
+            chunk=ChunkSettings(size=1000, max_concurrent=1, delay_seconds=0),
+        )
+
+        result = await main(cfg)
+        assert result is not None
+        assert result.user_glossary_enabled is True
+
+    @pytest.mark.asyncio
+    async def test_auto_glossary_disabled_flag(self, mocker):
+        mocker.patch("src.main._parse_glossaries", return_value=([], []))
+        mocker.patch("src.main.fetch_cost")
+
+        mock_llm = AsyncMock()
+        mock_llm.get_reply_async.return_value = ("Перевод", "completion-1")
+        mocker.patch("src.main.LLM", return_value=mock_llm)
+
+        cfg = Settings(
+            llm=LLMSettings(api_key=SecretStr("test-key")),
+            input_data=InputData(
+                source_lang=Lang("en"),
+                target_lang=Lang("ru"),
+                source_text="Hello.",
+                auto_glossary=False,
+            ),
+            chunk=ChunkSettings(size=1000, max_concurrent=1, delay_seconds=0),
+        )
+
+        result = await main(cfg)
+        assert result is not None
+        assert result.auto_glossary_enabled is False
+
+
+class TestMainRaisesOnEmptySource:
+    @pytest.mark.asyncio
+    async def test_raises_when_source_file_missing(self, mocker, tmp_path):
+        mocker.patch("src.main._parse_glossaries", return_value=([], []))
+
+        missing = tmp_path / "nonexistent.txt"
+        cfg = Settings(
+            input_data=InputData(
+                source_lang=Lang("en"),
+                target_lang=Lang("ru"),
+                source_file_path=missing,
+            ),
+        )
+        with pytest.raises(ValueError, match="Source text is empty"):
+            await main(cfg)
+
 
 class TestAutoDetectTranslation:
     """Translation pipeline with auto-detected languages."""
@@ -521,7 +760,8 @@ class TestAutoDetectTranslation:
         )
 
         result = await main(cfg)
-        assert result == "Перевод"
+        assert result is not None
+        assert result.text == "Перевод"
         assert cfg.input_data.source_lang == Lang("en")
         assert cfg.input_data.target_lang == Lang("ru")
 
@@ -545,7 +785,8 @@ class TestAutoDetectTranslation:
         )
 
         result = await main(cfg)
-        assert result == "Traducción"
+        assert result is not None
+        assert result.text == "Traducción"
         assert cfg.input_data.target_lang == Lang("ru")
 
 
@@ -578,6 +819,7 @@ class TestAutoDetectReview:
         )
 
         result = await main(cfg)
-        assert result == "Review OK"
+        assert result is not None
+        assert result.text == "Review OK"
         assert cfg.input_data.source_lang == Lang("en")
         assert cfg.input_data.target_lang == Lang("ru")

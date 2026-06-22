@@ -4,7 +4,7 @@ import hashlib
 import hmac
 import json
 import time
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from pydantic import SecretStr
@@ -12,6 +12,7 @@ from pydantic import SecretStr
 from src.config import EmailSettings, InputData, Settings
 from src.email_server import (
     SIGNATURE_TOLERANCE,
+    _build_info_block,
     _extract_sender,
     _handle_webhook,
     _process_inbound,
@@ -19,8 +20,34 @@ from src.email_server import (
     _verify_svix,
     serve,
 )
+from src.main import PipelineResult
 
 WSEC = "whsec_a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0=="
+
+
+def _make_pipeline_result(text: str) -> MagicMock:
+    pr = MagicMock()
+    pr.text = text
+    pr.source_lang = MagicMock()
+    pr.source_lang.name = "English"
+    pr.target_lang = MagicMock()
+    pr.target_lang.name = "Russian"
+    pr.source_chars = 100
+    pr.target_chars = 80
+    pr.chunk_count = 1
+    pr.model = "test-model"
+    pr.cost_total = 0.05
+    pr.cost_currency = "USD"
+    pr.cost_unknowns = 0
+    pr.auto_glossary_entries_matched = 5
+    pr.user_glossary_entries = 3
+    pr.specialized_in = "tech"
+    pr.doc_type = "manual"
+    pr.doc_title = "Test Doc"
+    pr.auto_glossary_enabled = True
+    pr.user_glossary_enabled = True
+    pr.mode = "translation"
+    return pr
 
 
 def _make_svix_signature(
@@ -381,10 +408,15 @@ class TestProcessInbound:
                 side_effect=main_side_effect,
             )
         elif main_return is not None:
+            pr = (
+                _make_pipeline_result(main_return)
+                if isinstance(main_return, str)
+                else main_return
+            )
             mocks["main"] = mocker.patch(
                 "src.email_server.main",
                 new_callable=AsyncMock,
-                return_value=main_return,
+                return_value=pr,
             )
         mock_reply_kwargs = {"new_callable": AsyncMock}
         if send_reply_side_effect:
@@ -488,7 +520,7 @@ class TestProcessInbound:
             cfg=cfg,
         )
         mock_dl.assert_not_called()
-        assert mocks["send_reply"].call_args.kwargs["body"] == "result"
+        assert mocks["send_reply"].call_args.kwargs["body"].startswith("result")
 
     async def test_sends_error_reply_when_build_settings_fails(self, mocker):
         mocks = self._setup_mocks(
@@ -568,7 +600,7 @@ class TestProcessInbound:
         )
         mocks["send_reply"].assert_called_once()
         kwargs = mocks["send_reply"].call_args.kwargs
-        assert kwargs["body"] == "Translation result"
+        assert kwargs["body"].startswith("Translation result")
         assert kwargs["to"] == "u@x.com"
         assert kwargs["message_id"] == "mid"
 
@@ -601,7 +633,7 @@ class TestProcessInbound:
             cfg=cfg,
         )
         assert call_count == 2
-        assert mocks["send_reply"].call_args.kwargs["body"] == "result"
+        assert mocks["send_reply"].call_args.kwargs["body"].startswith("result")
 
     async def test_send_reply_failure_is_silent(self, mocker):
         mocks = self._setup_mocks(
@@ -691,3 +723,126 @@ class TestSendErrorReply:
             api_key="key",
             detail="Something went wrong",
         )
+
+
+class TestBuildInfoBlock:
+    def test_includes_translated_text(self):
+        from iso639 import Lang
+
+        result = PipelineResult(
+            text="Translated text here",
+            source_lang=Lang("en"),
+            target_lang=Lang("ru"),
+            source_chars=100,
+            target_chars=80,
+            chunk_count=2,
+            model="anthropic/claude-3.5-sonnet",
+            cost_total=0.05,
+            cost_currency="USD",
+            cost_unknowns=0,
+            auto_glossary_entries_matched=5,
+            user_glossary_entries=3,
+            specialized_in="tech",
+            doc_type="manual",
+            doc_title="Test Doc",
+            auto_glossary_enabled=True,
+            user_glossary_enabled=True,
+            mode="translation",
+        )
+        info = _build_info_block(result)
+        assert "Request settings:" in info
+        assert "Usage Stats:" in info
+        assert "Source Lang: English" in info
+        assert "Target Lang: Russian" in info
+        assert "Specialized in: tech" in info
+        assert "Doc Type: manual" in info
+        assert "Doc Title: Test Doc" in info
+        assert "Auto Glossary: true" in info
+        assert "User Glossary: true" in info
+        assert "Chunks: 2" in info
+        assert "Source Chars: 100" in info
+        assert "Target Chars: 80" in info
+        assert "User Glossary Entries: 3" in info
+        assert "Auto Glossary Entries: 5" in info
+        assert "Model: anthropic/claude-3.5-sonnet" in info
+        assert "Cost: 0.05 USD" in info
+
+    def test_none_fields_rendered_as_null(self):
+        from iso639 import Lang
+
+        result = PipelineResult(
+            text="text",
+            source_lang=Lang("en"),
+            target_lang=Lang("ru"),
+            source_chars=0,
+            target_chars=0,
+            chunk_count=0,
+            model="test",
+            cost_total=None,
+            cost_currency="USD",
+            cost_unknowns=0,
+            auto_glossary_entries_matched=0,
+            user_glossary_entries=0,
+            specialized_in=None,
+            doc_type=None,
+            doc_title=None,
+            auto_glossary_enabled=False,
+            user_glossary_enabled=False,
+            mode="translation",
+        )
+        info = _build_info_block(result)
+        assert "Specialized in: null" in info
+        assert "Doc Type: null" in info
+        assert "Doc Title: null" in info
+
+    def test_cost_unknowns(self):
+        from iso639 import Lang
+
+        result = PipelineResult(
+            text="text",
+            source_lang=Lang("en"),
+            target_lang=Lang("ru"),
+            source_chars=0,
+            target_chars=0,
+            chunk_count=1,
+            model="test",
+            cost_total=1.50,
+            cost_currency="USD",
+            cost_unknowns=2,
+            auto_glossary_entries_matched=0,
+            user_glossary_entries=0,
+            specialized_in=None,
+            doc_type=None,
+            doc_title=None,
+            auto_glossary_enabled=False,
+            user_glossary_enabled=False,
+            mode="translation",
+        )
+        info = _build_info_block(result)
+        assert "Cost: 1.50 USD (2 unknown)" in info
+
+    def test_cost_total_none(self):
+        from iso639 import Lang
+
+        result = PipelineResult(
+            text="text",
+            source_lang=Lang("en"),
+            target_lang=Lang("ru"),
+            source_chars=0,
+            target_chars=0,
+            chunk_count=1,
+            model="test",
+            cost_total=None,
+            cost_currency="USD",
+            cost_unknowns=0,
+            auto_glossary_entries_matched=0,
+            user_glossary_entries=0,
+            specialized_in=None,
+            doc_type=None,
+            doc_title=None,
+            auto_glossary_enabled=False,
+            user_glossary_enabled=False,
+            mode="translation",
+        )
+        info = _build_info_block(result)
+        assert "Cost: UNKNOWN" in info

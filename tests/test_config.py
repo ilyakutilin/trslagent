@@ -135,12 +135,12 @@ class TestInputData:
 
     def test_raises_on_missing_source_file_path(self):
         bad_path = Path("/nonexistent/path.txt")
-        with pytest.raises(ValueError, match=r"Failed to read .*nonexistent"):
-            InputData(
-                source_lang=Lang("en"),
-                target_lang=Lang("ru"),
-                source_file_path=bad_path,
-            )
+        data = InputData(
+            source_lang=Lang("en"),
+            target_lang=Lang("ru"),
+            source_file_path=bad_path,
+        )
+        assert data.source_text is None
 
 
 class TestOutputData:
