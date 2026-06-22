@@ -117,6 +117,8 @@ def _patch_toml_for_attachments(
         for k, v in values.items():
             if isinstance(v, str):
                 lines.append(f'{k} = "{v}"')
+            elif isinstance(v, bool):
+                lines.append(f"{k} = {str(v).lower()}")
             else:
                 lines.append(f"{k} = {v}")
         lines.append("")
