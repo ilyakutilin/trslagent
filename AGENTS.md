@@ -20,6 +20,7 @@
 - The TOML path is threaded via the **class variable** `Settings._toml_path`, which must be set _before_ `Settings()` is instantiated. See `src/config.py:330`.
 - Env vars use double-underscore nesting: `LLM__MODEL`, `CHUNK__SIZE`, `GLOSSARY__XML_DIR`, etc.
 - Language fields accept either ISO 639-1 codes (`"en"`, `"ru"`) or full names (`"English"`, `"Russian"`).
+- Both `source_lang` and `target_lang` are **optional**. When not set, the source language is auto-detected from the source text via `langdetect` (first ~200 chars). In translation mode, the target language defaults to `ru` (or `en` if the source is Russian). In review mode, both languages are auto-detected from their respective texts. Detection logic lives in `src/language_detection.py` and is invoked at the start of `main()`.
 
 ## Lemmatizer Constraints
 

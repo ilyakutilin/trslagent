@@ -181,8 +181,23 @@ LangField = Annotated[
 
 
 class InputData(BaseModel):
-    source_lang: LangField = Field(default=Lang("en"), description="Source language")
-    target_lang: LangField = Field(default=Lang("en"), description="Target language")
+    source_lang: LangField | None = Field(
+        default=None,
+        description=(
+            "Source language. ISO 639-1 code or full name. "
+            "If not set, detected automatically from the source text "
+            "via langdetect."
+        ),
+    )
+    target_lang: LangField | None = Field(
+        default=None,
+        description=(
+            "Target language. ISO 639-1 code or full name. "
+            "If not set in translation mode, defaults to 'ru' "
+            "(or 'en' if source is Russian). "
+            "In review mode, detected automatically from the target text."
+        ),
+    )
     specialized_in: str | None = Field(
         default=None,
         description="Specialization of the LLM translator. Fed into the system prompt",
@@ -232,7 +247,11 @@ class InputData(BaseModel):
 
     @model_validator(mode="after")
     def validate_input_data(self) -> Self:
-        if self.source_lang == self.target_lang:
+        if (
+            self.source_lang is not None
+            and self.target_lang is not None
+            and self.source_lang == self.target_lang
+        ):
             raise ValueError("Please set the source and target langs correctly")
 
         if self.source_text is None:

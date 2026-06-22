@@ -82,8 +82,6 @@ Minimal config for translation:
 
 ```toml
 [input_data]
-source_lang = "en"
-target_lang = "ru"
 source_file_path = "files/source.txt"
 auto_glossary = true
 
@@ -91,12 +89,14 @@ auto_glossary = true
 result_file_path = "files/result.md"
 ```
 
+`source_lang` and `target_lang` are **optional** — when not set, the source language is auto-detected via [langdetect](https://pypi.org/project/langdetect/) (first ~200 characters). In translation mode, the target language defaults to `ru` (or `en` if the source is Russian). In review mode, both languages are auto-detected from the respective texts.
+
 All sections and their keys:
 
 | Section       | Key                            | Default                                 | Description                                            |
 | ------------- | ------------------------------ | --------------------------------------- | ------------------------------------------------------ |
-| `input_data`  | `source_lang`                  | `"en"`                                  | ISO 639-1 code or full name                            |
-|               | `target_lang`                  | `"en"`                                  | ISO 639-1 code or full name                            |
+| `input_data`  | `source_lang`                  | auto-detected                           | ISO 639-1 code or full name (optional)                |
+|               | `target_lang`                  | auto-detected / defaulted               | ISO 639-1 code or full name (optional)                |
 |               | `specialized_in`               | —                                       | Domain expertise for system prompt                     |
 |               | `doc_type`                     | —                                       | e.g. `"letter"`, `"procedure"`                         |
 |               | `doc_title`                    | —                                       | Document title for prompt context                      |
@@ -138,6 +138,8 @@ LLM__API_KEY=sk-or-v1-...
 LLM__MODEL=qwen/qwen3.7-max
 LLM__TEMPERATURE=0.1
 LLM__REASONING_EFFORT=high
+INPUT_DATA__SOURCE_LANG=en       # optional — auto-detected if not set
+INPUT_DATA__TARGET_LANG=ru       # optional — auto-detected/defaulted if not set
 CHUNK__SIZE=6000
 CHUNK__DIVIDER=-
 CHUNK__MAX_CONCURRENT=3
@@ -181,12 +183,12 @@ Set `target_file_path` in your TOML to enable review mode:
 
 ```toml
 [input_data]
-source_lang = "en"
-target_lang = "ru"
 source_file_path = "files/source.md"
 target_file_path = "files/result.md"    # existing translation
 auto_glossary = true
 ```
+
+Both `source_lang` and `target_lang` are optional — they will be auto-detected from the source and target texts.
 
 This sends the full source + target text (no chunking) to the LLM and asks it to report critical mistakes: missing/incorrect translations, distortions, spelling errors, wrong numbers, dictionary deviations.
 

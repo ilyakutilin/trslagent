@@ -4,6 +4,7 @@ from src.config import Settings, logger
 from src.glossary.matcher import TermMatcher
 from src.glossary.models import GlossaryEntry
 from src.glossary.parser import AutoGlossaryParser, UserGlossaryParser
+from src.language_detection import resolve_languages
 from src.lemmatizer import Lemmatizer
 from src.llm import LLM, fetch_cost
 from src.reviewer import Reviewer
@@ -40,6 +41,8 @@ def _parse_glossaries(
 
     user_entries: list[GlossaryEntry] = []
     if cfg.input_data.user_glossary_lines:
+        assert cfg.input_data.source_lang is not None
+        assert cfg.input_data.target_lang is not None
         user_entries = UserGlossaryParser(
             user_glossary_lines=cfg.input_data.user_glossary_lines,
             source_lang=cfg.input_data.source_lang,
@@ -110,6 +113,10 @@ async def _resolve_and_log_cost(
 
 
 async def main(cfg: Settings) -> str | None:
+    resolve_languages(cfg)
+    assert cfg.input_data.source_lang is not None
+    assert cfg.input_data.target_lang is not None
+
     lemmatizer = Lemmatizer()
 
     auto_glossary_entries, user_glossary_entries = _parse_glossaries(cfg, lemmatizer)
@@ -415,6 +422,10 @@ async def main(cfg: Settings) -> str | None:
 
 
 def export_glossary_matches(cfg: Settings) -> str:
+    resolve_languages(cfg)
+    assert cfg.input_data.source_lang is not None
+    assert cfg.input_data.target_lang is not None
+
     lemmatizer = Lemmatizer()
 
     auto_glossary_entries, user_glossary_entries = _parse_glossaries(cfg, lemmatizer)

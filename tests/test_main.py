@@ -493,3 +493,91 @@ class TestResolveAndLogCost:
 
         await _resolve_and_log_cost([], "test-key", cfg)
         mock_fetch.assert_not_called()
+
+
+class TestAutoDetectTranslation:
+    """Translation pipeline with auto-detected languages."""
+
+    @pytest.mark.asyncio
+    async def test_both_none_english_source_detected(self, mocker):
+        mocker.patch("src.main._parse_glossaries", return_value=([], []))
+        mocker.patch("src.main.fetch_cost")
+
+        mock_llm = AsyncMock()
+        mock_llm.get_reply_async.return_value = ("Перевод", "completion-1")
+        mocker.patch("src.main.LLM", return_value=mock_llm)
+
+        cfg = Settings(
+            llm=LLMSettings(api_key=SecretStr("test-key")),
+            input_data=InputData(
+                source_lang=None,
+                target_lang=None,
+                source_text=(
+                    "This is an English document that needs to be translated "
+                    "into another language. The architecture is described here."
+                ),
+            ),
+            chunk=ChunkSettings(size=1000, max_concurrent=1, delay_seconds=0),
+        )
+
+        result = await main(cfg)
+        assert result == "Перевод"
+        assert cfg.input_data.source_lang == Lang("en")
+        assert cfg.input_data.target_lang == Lang("ru")
+
+    @pytest.mark.asyncio
+    async def test_source_set_target_none_defaults_ru(self, mocker):
+        mocker.patch("src.main._parse_glossaries", return_value=([], []))
+        mocker.patch("src.main.fetch_cost")
+
+        mock_llm = AsyncMock()
+        mock_llm.get_reply_async.return_value = ("Traducción", "completion-1")
+        mocker.patch("src.main.LLM", return_value=mock_llm)
+
+        cfg = Settings(
+            llm=LLMSettings(api_key=SecretStr("test-key")),
+            input_data=InputData(
+                source_lang=Lang("fr"),
+                target_lang=None,
+                source_text="Texte français à traduire.",
+            ),
+            chunk=ChunkSettings(size=1000, max_concurrent=1, delay_seconds=0),
+        )
+
+        result = await main(cfg)
+        assert result == "Traducción"
+        assert cfg.input_data.target_lang == Lang("ru")
+
+
+class TestAutoDetectReview:
+    """Review pipeline with auto-detected languages."""
+
+    @pytest.mark.asyncio
+    async def test_both_none_review_detected(self, mocker):
+        mocker.patch("src.main._parse_glossaries", return_value=([], []))
+        mocker.patch("src.main.fetch_cost")
+
+        mock_llm = AsyncMock()
+        mock_llm.get_reply_async.return_value = ("Review OK", "id-1")
+        mocker.patch("src.main.LLM", return_value=mock_llm)
+
+        cfg = Settings(
+            llm=LLMSettings(api_key=SecretStr("test-key")),
+            input_data=InputData(
+                source_lang=None,
+                target_lang=None,
+                source_text=(
+                    "This is an English source document for review. "
+                    "It contains enough text for reliable detection."
+                ),
+                target_text=(
+                    "Это перевод на русский язык для проверки. "
+                    "Текст содержит достаточно информации."
+                ),
+            ),
+        )
+
+        result = await main(cfg)
+        assert result == "Review OK"
+        assert cfg.input_data.source_lang == Lang("en")
+        assert cfg.input_data.target_lang == Lang("ru")
