@@ -62,6 +62,7 @@
   - `source.txt` — source text; if absent, the plain-text email body is used.
   - `target.txt` — existing translation (triggers review mode instead of translation).
   - `glossary.txt` — user glossary overrides (`term = translation` lines).
+- **Glossary match mode**: When the email body starts with `@match-glossary` (case-insensitive, first non-empty line), the server runs glossary term matching instead of translation/review. The trigger line is stripped; the remaining body or `source.txt` attachment provides the source text. No LLM calls are made; the reply is just the matched `source_term = target_term` lines with no statistics.
 - Runs the full translation/review pipeline (`src/main.py:main`) with the constructed settings.
 - Sends the result back as a threaded reply via the Resend Send API (`In-Reply-To` header set to the original `message_id`).
 - Error replies are sent on attachment-too-large, fetch failure, parsing failure, pipeline failure, or empty output.

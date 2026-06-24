@@ -203,6 +203,11 @@ def build_settings_from_email(
     directly, bypassing file reads. If no ``source.txt`` is provided, the
     plain-text email body is used as the source text.
 
+    If the email body starts with ``@match-glossary`` (case-insensitive)
+    as the first non-empty line, that line is stripped and
+    ``match_glossary_only`` is set on ``InputData``, triggering
+    glossary-term matching instead of translation or review.
+
     Args:
         attachment_bodies: Mapping of attachment filenames to their raw
             bytes content.
@@ -217,6 +222,17 @@ def build_settings_from_email(
     source_text: str | None = None
     target_text: str | None = None
     glossary_lines: list[str] | None = None
+
+    MATCH_TRIGGER = "@match-glossary"
+    match_glossary_only = False
+    clean_body = email_body.strip()
+    if clean_body:
+        first_line = clean_body.split("\n", 1)[0].strip()
+        if first_line.casefold() == MATCH_TRIGGER.casefold():
+            match_glossary_only = True
+            _, sep, rest = clean_body.partition("\n")
+            clean_body = rest.strip()
+            logger.info("Match-glossary mode triggered via email body prefix")
 
     if "source.txt" in attachment_bodies:
         source_text = attachment_bodies["source.txt"].decode("utf-8")
@@ -240,14 +256,16 @@ def build_settings_from_email(
 
         if source_text is not None:
             settings.input_data.source_text = source_text
-        elif email_body.strip():
-            settings.input_data.source_text = email_body.strip()
+        elif clean_body:
+            settings.input_data.source_text = clean_body
 
         if target_text is not None:
             settings.input_data.target_text = target_text
 
         if glossary_lines is not None:
             settings.input_data.user_glossary_lines = glossary_lines
+
+        settings.input_data.match_glossary_only = match_glossary_only
 
         return settings
 
@@ -259,14 +277,16 @@ def build_settings_from_email(
 
     if source_text is not None:
         settings.input_data.source_text = source_text
-    elif email_body.strip():
-        settings.input_data.source_text = email_body.strip()
+    elif clean_body:
+        settings.input_data.source_text = clean_body
 
     if target_text is not None:
         settings.input_data.target_text = target_text
 
     if glossary_lines is not None:
         settings.input_data.user_glossary_lines = glossary_lines
+
+    settings.input_data.match_glossary_only = match_glossary_only
 
     return settings
 

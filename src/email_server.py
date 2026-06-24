@@ -20,7 +20,7 @@ from src.email_processor import (
     fetch_email_content,
     send_reply,
 )
-from src.main import main, PipelineResult
+from src.main import export_glossary_matches, main, PipelineResult
 
 SIGNATURE_TOLERANCE = 300  # 5 minutes
 
@@ -234,11 +234,11 @@ async def _process_inbound(
     message_id: str,
     cfg: Settings,
 ) -> None:
-    """Fetch and process an inbound email for translation or review.
+    """Fetch and process an inbound email for translation, review, or glossary matching.
 
     Downloads the email body and attachments, builds per-request settings,
-    runs the translation/review pipeline, and sends the result (or an
-    error) as a threaded reply.
+    runs the translation/review/glossary-match pipeline, and sends the result
+    (or an error) as a threaded reply.
 
     Args:
         email_id: Resend email ID.
@@ -317,6 +317,45 @@ async def _process_inbound(
             api_key=api_key,
             detail="Failed to parse the request. Please check your attachments and try again.",
         )
+        return
+
+    if translation_settings.input_data.match_glossary_only:
+        try:
+            result_text = export_glossary_matches(cfg=translation_settings)
+        except Exception:
+            logger.exception("Glossary matching failed")
+            await _send_error_reply(
+                sender=sender,
+                subject=subject,
+                message_id=message_id,
+                email_settings=email_settings,
+                api_key=api_key,
+                detail="An error occurred during glossary matching. Please try again.",
+            )
+            return
+
+        if not result_text:
+            await _send_error_reply(
+                sender=sender,
+                subject=subject,
+                message_id=message_id,
+                email_settings=email_settings,
+                api_key=api_key,
+                detail="No glossary entries matched your text. Check the source language and glossary.",
+            )
+            return
+
+        try:
+            await send_reply(
+                to=sender,
+                subject=subject,
+                body=result_text,
+                message_id=message_id,
+                from_address=email_settings.from_address,
+                api_key=api_key,
+            )
+        except Exception:
+            logger.exception("Failed to send match-glossary reply to {}", sender)
         return
 
     try:

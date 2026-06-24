@@ -260,6 +260,14 @@ class InputData(BaseModel):
     user_glossary_lines: list[str] | None = Field(
         default=None, description="String lines read from the user glossary file"
     )
+    match_glossary_only: bool = Field(
+        default=False,
+        description=(
+            "When True, run glossary matching only (no LLM). "
+            "Set by the email processor when the email body "
+            "triggers match-glossary mode."
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_input_data(self) -> Self:

@@ -252,6 +252,17 @@ python src/cli.py serve-emails files/config.toml
 - `glossary.txt` — user glossary overrides (`term = translation` per line)
 - `config.toml` — optional per-request config (languages, chunk settings, LLM params, etc.)
 
+**Glossary matching via email:**
+
+To receive matched glossary terms instead of a translation or review, start the email body with `@match-glossary` as the first non-empty line (case-insensitive). The rest of the body (or the `source.txt` attachment, if present) is used as source text. No LLM is called — only term matching is performed. The reply contains matched entries in `source_term = target_term` format with no extra statistics.
+
+Example email body:
+
+```
+@match-glossary
+The handover certificate was signed after mechanical completion was achieved.
+```
+
 **Security:**
 
 - Webhook payloads are verified with Svix HMAC-SHA256 signatures (secret in `email.resend_webhook_secret`)
