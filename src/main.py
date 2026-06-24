@@ -12,7 +12,7 @@ from src.glossary.matcher import TermMatcher
 from src.glossary.models import GlossaryEntry
 from src.glossary.parser import AutoGlossaryParser, UserGlossaryParser
 from src.language_detection import resolve_languages
-from src.lemmatizer import Lemmatizer
+from src.lemmatizer import Lemmatizer, parse_known_abbrs
 from src.llm import LLM, fetch_cost
 from src.reviewer import Reviewer
 from src.splitter import split_by_divider, split_text, stitch_chunks
@@ -90,6 +90,12 @@ def _stringify_glossary(
             str_entries.append(str_entry)
 
     return "\n".join(str_entries)
+
+
+def _resolve_known_abbrs(cfg: Settings) -> set[str]:
+    if cfg.glossary.known_abbrs_file_path:
+        return parse_known_abbrs(cfg.glossary.known_abbrs_file_path)
+    return set()
 
 
 def _parse_glossaries(
@@ -242,7 +248,7 @@ async def main(cfg: Settings) -> PipelineResult | None:
             "programmatically before calling main()."
         )
 
-    lemmatizer = Lemmatizer()
+    lemmatizer = Lemmatizer(known_abbrs=_resolve_known_abbrs(cfg))
 
     auto_glossary_entries, user_glossary_entries = _parse_glossaries(cfg, lemmatizer)
 
@@ -679,7 +685,7 @@ def export_glossary_matches(cfg: Settings) -> str:
     assert cfg.input_data.source_lang is not None
     assert cfg.input_data.target_lang is not None
 
-    lemmatizer = Lemmatizer()
+    lemmatizer = Lemmatizer(known_abbrs=_resolve_known_abbrs(cfg))
 
     auto_glossary_entries, user_glossary_entries = _parse_glossaries(cfg, lemmatizer)
 

@@ -227,7 +227,7 @@ Runs the full glossary matching pipeline and writes the matched term=translation
 python src/glossary/get_abbrs.py files/config.toml
 ```
 
-Scans the auto glossary for abbreviation-like terms (all-uppercase or mixed-case, ≤8 chars) and writes them to `files/abbrs`. These are then excluded from lemmatization during matching.
+Scans the auto glossary for abbreviation-like terms (all-uppercase or mixed-case, ≤8 chars) and writes them to `files/abbrs`. These are then excluded from lemmatization during matching. **After running this script, delete the `*.pickle` cache files** in the glossary directory to force re-parsing with the updated abbreviations.
 
 ### Email-based translation (webhook server)
 
@@ -316,6 +316,7 @@ Expected XML structure (`<mtf>` root):
 - The glossary is **bidirectional** — entries are used regardless of which language is source vs target
 - Synonyms are split by `;` or `|`
 - Cache is stored as `.pickle` files alongside the XMLs, validated by SHA-256 hash
+- **Important**: after running `get_abbrs.py` to update `files/abbrs`, delete the `*.pickle` cache files so the glossary is re-parsed with the updated abbreviation list
 
 ### User glossary (override)
 
