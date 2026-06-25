@@ -181,7 +181,8 @@ def _patch_toml_for_attachments(
         lines.append(f"[{section}]")
         for k, v in values.items():
             if isinstance(v, str):
-                lines.append(f'{k} = "{v}"')
+                escaped = v.replace("\\", "\\\\").replace('"', '\\"')
+                lines.append(f'{k} = "{escaped}"')
             elif isinstance(v, bool):
                 lines.append(f"{k} = {str(v).lower()}")
             else:

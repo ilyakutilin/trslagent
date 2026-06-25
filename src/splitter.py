@@ -40,7 +40,7 @@ def split_by_divider(text: str, divider: str) -> list[str]:
     Example: if divider is \"-\", lines like \"----------\" or \"--------------------\"
     act as separators and are removed from the output.
     """
-    pattern = r"^" + re.escape(divider) + r"{10,}$"
+    pattern = r"^" + re.escape(divider) + r"{10,}\r?$"
     parts = re.split(pattern, text, flags=re.MULTILINE)
     return [p.strip() for p in parts if p.strip()]
 
