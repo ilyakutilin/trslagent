@@ -2,7 +2,7 @@
 
 ## Entrypoint
 
-- The **only** CLI is `python src/cli.py <config.toml>` — a single config-driven entrypoint.
+- The CLI entrypoint is `python src/cli.py <config.toml>` — a single config-driven entrypoint.
 - Additional subcommands:
   - `python src/cli.py <config.toml> --match-glossary --match-output <path>` — export glossary matches.
   - `python src/cli.py serve-emails <config.toml>` — start the email webhook server.
@@ -36,7 +36,7 @@
 
 ## LLM
 
-- Uses OpenRouter API. Default base URL: `https://openrouter.ai/api/v1`.
+- Uses OpenRouter or any OpenAI-compatible API. Default base URL: `https://openrouter.ai/api/v1`.
 - 5 retries with exponential backoff for timeout/rate-limit/connection errors. Other errors raise immediately.
 - `--print-prompt-only` / `print_prompt_only: true` skips LLM calls and prints the constructed prompts to stdout.
 
@@ -78,4 +78,12 @@
 
 ## Testing / Linting / CI
 
-- No tests, no linting config, no typecheck config, no CI workflows. None exist in this repo.
+- The project is covered by tests (pytest). Each new functionality or change shall also be covered by tests. If that's a new feature, create new tests. If that's a change, change the corresponding tests accordingly. Whatever change is introduced to the code, reflect that change in the tests, and look for tests that might be potentially broken as a result of the changes that you introduce.
+- Linting and formatting is done by ruff.
+- Type checking is done by pyright.
+- Always run ruff check, ruff format, pyright, pytest after completion of any code modification to check that nothing is broken, and fix the errors if any.
+- No CI/CD in the project.
+
+## Language
+
+All the comments and documentation in the project shall be in English. All communication with the user shall be in English.
