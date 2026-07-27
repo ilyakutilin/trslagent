@@ -14,9 +14,10 @@ Config TOML
     │   For each chunk:                                         │  │
     │     match glossary terms (Aho-Corasick on lemmas)  ◄──────┘  │
     │     deduplicate (user overrides auto)                        │
-    │     build LLM prompt (system + user + dictionary)            │
+    │     build LLM prompt (system + user + dictionary + ref doc)  │
     │     call OpenRouter LLM                                      │
     │                                                              │
+    ├── Reference doc ──► injected into system prompt (context)    │
     └── Stitch ──► write result
 ```
 
@@ -105,6 +106,9 @@ All sections and their keys:
 |               | `target_file_path`             | —                                       | Set to enable **review mode**                          |
 |               | `auto_glossary`                | `false`                                 | Match auto glossary against source                     |
 |               | `user_glossary_file_path`      | —                                       | Path to user glossary `.txt`                           |
+|               | `ref_source_file_path`         | —                                       | Path to reference document in source language          |
+|               | `ref_target_file_path`         | —                                       | Path to reference document in target language          |
+|               | `ref_max_length`               | `10000`                                 | Max chars for reference doc (longer texts truncated)   |
 | `output_data` | `result_file_path`             | `"files/result.md"`                     | Output file                                            |
 |               | `raw_result_file_path`         | `"files/raw_result.json"`               | (unused)                                               |
 |               | `print_prompt_only`            | `false`                                 | Dry-run: print prompts, skip LLM                       |
@@ -250,6 +254,8 @@ python src/cli.py serve-emails files/config.toml
 - `source.txt` — source text to translate or review (UTF-8)
 - `target.txt` — existing translation for review mode only; triggers review vs. translation
 - `glossary.txt` — user glossary overrides (`term = translation` per line)
+- `ref_source.txt` — reference document in source language (optional, provides context)
+- `ref_target.txt` — reference document in target language (optional, provides context)
 - `config.toml` — optional per-request config (languages, chunk settings, LLM params, etc.)
 
 **Glossary matching via email:**
@@ -335,6 +341,30 @@ commissioning = пусконаладка | ПНР
 - **User glossary always overrides the auto glossary** on a per-term basis
 - Terms in the user glossary that don't appear in the auto glossary are still included
 
+## Reference Document
+
+A bilingual (or monolingual) document that provides contextual guidance to the LLM. Examples: the letter you are replying to, the previous revision of a document, or a technical standard that applies to the text being translated or reviewed.
+
+Configured via TOML:
+
+```toml
+[input_data]
+ref_source_file_path = "files/ref_source.txt"
+ref_target_file_path = "files/ref_target.txt"
+ref_max_length = 10000
+```
+
+Or via env vars: `INPUT_DATA__REF_SOURCE_FILE_PATH`, `INPUT_DATA__REF_TARGET_FILE_PATH`, `INPUT_DATA__REF_MAX_LENGTH`.
+
+- `ref_source_file_path` — reference text in the **source** language.
+- `ref_target_file_path` — reference text in the **target** language (optional, can be omitted for a monolingual reference).
+- When both are provided, the LLM sees both sides as an aligned reference pair.
+- Texts longer than `ref_max_length` (default 10,000 chars) are truncated with a warning to stay within context windows.
+
+The reference text is injected wholesale into the LLM system prompt (not chunked or translated). The prompt tells the LLM to use it as a source of truth for terminology, style, and overall context, and that it may quote from it where applicable.
+
+In email mode, attach `ref_source.txt` and/or `ref_target.txt` alongside the other attachments.
+
 ## Lemmatization
 
 - **English**: spaCy `en_core_web_sm` (must be manually installed)
@@ -364,4 +394,16 @@ Consider and use them only if applicable; otherwise ignore.
 <auto dictionary start>
 SOURCE_TERM = TARGET_TERM
 <auto dictionary end>
+
+The user has provided a reference document for additional context.
+This document is related to the text being translated and should be used
+as a source of truth for terminology, style, and overall context.
+You may quote from it where applicable.
+<reference document>
+English:
+<ref_source_text>
+
+Russian:
+<ref_target_text>
+</reference document>
 ```

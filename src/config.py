@@ -268,6 +268,35 @@ class InputData(BaseModel):
             "triggers match-glossary mode."
         ),
     )
+    ref_source_file_path: Path | None = Field(
+        default=None,
+        description=(
+            "Path to the reference document in the source language. "
+            "A bilingual or monolingual reference document that provides "
+            "context, terminology, and style guidance for the LLM."
+        ),
+    )
+    ref_target_file_path: Path | None = Field(
+        default=None,
+        description=(
+            "Path to the reference document in the target language. "
+            "If set together with ref_source_file_path, the LLM receives "
+            "both sides as aligned reference material."
+        ),
+    )
+    ref_source_text: str | None = Field(
+        default=None, description="Reference document text in the source language"
+    )
+    ref_target_text: str | None = Field(
+        default=None, description="Reference document text in the target language"
+    )
+    ref_max_length: int = Field(
+        default=10000,
+        description=(
+            "Maximum character length for reference document text. "
+            "Longer texts are truncated with a warning."
+        ),
+    )
 
     @model_validator(mode="after")
     def validate_input_data(self) -> Self:
@@ -319,6 +348,39 @@ class InputData(BaseModel):
                     e,
                 )
                 self.user_glossary_lines = None
+
+        if self.ref_source_text is None and self.ref_source_file_path is not None:
+            try:
+                self.ref_source_text = read_str_from_file(fp=self.ref_source_file_path)
+            except (IOError, OSError, UnicodeDecodeError) as e:
+                logger.warning(
+                    "Failed to read ref source {}: {}",
+                    self.ref_source_file_path,
+                    e,
+                )
+                self.ref_source_text = None
+
+        if self.ref_target_text is None and self.ref_target_file_path is not None:
+            try:
+                self.ref_target_text = read_str_from_file(fp=self.ref_target_file_path)
+            except (IOError, OSError, UnicodeDecodeError) as e:
+                logger.warning(
+                    "Failed to read ref target {}: {}",
+                    self.ref_target_file_path,
+                    e,
+                )
+                self.ref_target_text = None
+
+        for ref_name in ("ref_source_text", "ref_target_text"):
+            text = getattr(self, ref_name)
+            if text is not None and len(text) > self.ref_max_length:
+                logger.warning(
+                    "{} exceeds max reference length ({} > {}), truncating",
+                    ref_name,
+                    len(text),
+                    self.ref_max_length,
+                )
+                setattr(self, ref_name, text[: self.ref_max_length])
 
         return self
 

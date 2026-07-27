@@ -10,7 +10,7 @@ class TestBuildSystemPrompt:
     def test_no_specialization_no_glossary_no_doc_context(
         self, en_lang: Lang, ru_lang: Lang
     ):
-        reviewer = Reviewer(en_lang, ru_lang, None, None, None, None, None)
+        reviewer = Reviewer(en_lang, ru_lang, None, None, None, None, None, None, None)
         result = reviewer._build_system_prompt(
             user_glossary_str="",
             auto_glossary_str="",
@@ -24,7 +24,9 @@ class TestBuildSystemPrompt:
         assert "Additional instructions from the user:" not in result
 
     def test_with_specialized_in(self, en_lang: Lang, ru_lang: Lang):
-        reviewer = Reviewer(en_lang, ru_lang, "medicine", None, None, None, None)
+        reviewer = Reviewer(
+            en_lang, ru_lang, "medicine", None, None, None, None, None, None
+        )
         result = reviewer._build_system_prompt(
             user_glossary_str="",
             auto_glossary_str="",
@@ -33,7 +35,7 @@ class TestBuildSystemPrompt:
 
     def test_with_doc_type_and_title(self, en_lang: Lang, ru_lang: Lang):
         reviewer = Reviewer(
-            en_lang, ru_lang, None, "report", "Annual Review", None, None
+            en_lang, ru_lang, None, "report", "Annual Review", None, None, None, None
         )
         result = reviewer._build_system_prompt(
             user_glossary_str="",
@@ -43,7 +45,9 @@ class TestBuildSystemPrompt:
         assert "Annual Review" in result
 
     def test_with_doc_title_only(self, en_lang: Lang, ru_lang: Lang):
-        reviewer = Reviewer(en_lang, ru_lang, None, None, "Annual Review", None, None)
+        reviewer = Reviewer(
+            en_lang, ru_lang, None, None, "Annual Review", None, None, None, None
+        )
         result = reviewer._build_system_prompt(
             user_glossary_str="",
             auto_glossary_str="",
@@ -52,7 +56,7 @@ class TestBuildSystemPrompt:
         assert "Annual Review" in result
 
     def test_with_user_glossary(self, en_lang: Lang, ru_lang: Lang):
-        reviewer = Reviewer(en_lang, ru_lang, None, None, None, None, None)
+        reviewer = Reviewer(en_lang, ru_lang, None, None, None, None, None, None, None)
         glossary = "flow meter = расходомер\npressure valve = клапан давления"
         result = reviewer._build_system_prompt(
             user_glossary_str=glossary,
@@ -66,7 +70,7 @@ class TestBuildSystemPrompt:
         assert "auto dictionary" not in result
 
     def test_with_auto_glossary(self, en_lang: Lang, ru_lang: Lang):
-        reviewer = Reviewer(en_lang, ru_lang, None, None, None, None, None)
+        reviewer = Reviewer(en_lang, ru_lang, None, None, None, None, None, None, None)
         glossary = "flow meter = расходомер\npressure valve = клапан давления"
         result = reviewer._build_system_prompt(
             user_glossary_str="",
@@ -80,7 +84,7 @@ class TestBuildSystemPrompt:
         assert "user dictionary" not in result
 
     def test_with_both_glossaries(self, en_lang: Lang, ru_lang: Lang):
-        reviewer = Reviewer(en_lang, ru_lang, None, None, None, None, None)
+        reviewer = Reviewer(en_lang, ru_lang, None, None, None, None, None, None, None)
         user_glossary = "flow meter = расходомер"
         auto_glossary = "pressure valve = клапан давления"
         result = reviewer._build_system_prompt(
@@ -95,7 +99,15 @@ class TestBuildSystemPrompt:
 
     def test_with_additional_instructions(self, en_lang: Lang, ru_lang: Lang):
         reviewer = Reviewer(
-            en_lang, ru_lang, None, None, None, "Be extra thorough.", None
+            en_lang,
+            ru_lang,
+            None,
+            None,
+            None,
+            "Be extra thorough.",
+            None,
+            None,
+            None,
         )
         result = reviewer._build_system_prompt(
             user_glossary_str="",
@@ -105,7 +117,7 @@ class TestBuildSystemPrompt:
         assert "Be extra thorough." in result
 
     def test_without_additional_instructions(self, en_lang: Lang, ru_lang: Lang):
-        reviewer = Reviewer(en_lang, ru_lang, None, None, None, None, None)
+        reviewer = Reviewer(en_lang, ru_lang, None, None, None, None, None, None, None)
         result = reviewer._build_system_prompt(
             user_glossary_str="",
             auto_glossary_str="",
@@ -115,7 +127,7 @@ class TestBuildSystemPrompt:
 
 class TestBuildUserPrompt:
     def test_formats_source_and_target(self, en_lang: Lang, ru_lang: Lang):
-        reviewer = Reviewer(en_lang, ru_lang, None, None, None, None, None)
+        reviewer = Reviewer(en_lang, ru_lang, None, None, None, None, None, None, None)
         source = "The quick brown fox"
         target = "Быстрая коричневая лиса"
         result = reviewer._build_user_prompt(source, target)
@@ -130,7 +142,7 @@ class TestReviewTextAsync:
     def reviewer_with_llm(
         self, en_lang: Lang, ru_lang: Lang, mock_llm: AsyncMock
     ) -> Reviewer:
-        return Reviewer(en_lang, ru_lang, None, None, None, None, mock_llm)
+        return Reviewer(en_lang, ru_lang, None, None, None, None, None, None, mock_llm)
 
     @pytest.mark.asyncio
     async def test_llm_available(
@@ -150,7 +162,7 @@ class TestReviewTextAsync:
 
     @pytest.mark.asyncio
     async def test_llm_none(self, en_lang: Lang, ru_lang: Lang, capsys):
-        reviewer = Reviewer(en_lang, ru_lang, None, None, None, None, None)
+        reviewer = Reviewer(en_lang, ru_lang, None, None, None, None, None, None, None)
         source = "The quick brown fox."
         target = "Быстрая коричневая лиса."
         review, cid = await reviewer.review_text_async(
@@ -171,3 +183,85 @@ class TestReviewTextAsync:
         target_pos = captured.out.index(target)
         assert source_pos > user_section_start
         assert target_pos > user_section_start
+
+
+class TestBuildSystemPromptWithRefDoc:
+    def test_ref_source_only_in_prompt(self, en_lang: Lang, ru_lang: Lang):
+        reviewer = Reviewer(
+            en_lang,
+            ru_lang,
+            None,
+            None,
+            None,
+            None,
+            "Ref source text here.",
+            None,
+            None,
+        )
+        result = reviewer._build_system_prompt(
+            user_glossary_str="",
+            auto_glossary_str="",
+        )
+        assert "reference document" in result
+        assert "Ref source text here." in result
+        assert "English:" in result
+        ref_section_start = result.index("<reference document>")
+        ref_section_end = result.index("</reference document>")
+        ref_section = result[ref_section_start:ref_section_end]
+        assert "English:" in ref_section
+        assert "Russian:" not in ref_section
+
+    def test_ref_source_and_target_in_prompt(self, en_lang: Lang, ru_lang: Lang):
+        reviewer = Reviewer(
+            en_lang,
+            ru_lang,
+            None,
+            None,
+            None,
+            None,
+            "Source ref.",
+            "Target ref.",
+            None,
+        )
+        result = reviewer._build_system_prompt(
+            user_glossary_str="",
+            auto_glossary_str="",
+        )
+        assert "reference document" in result
+        assert "Source ref." in result
+        assert "Target ref." in result
+        assert "English:" in result
+        assert "Russian:" in result
+
+    def test_ref_doc_after_glossary_and_before_additional_instructions(
+        self, en_lang: Lang, ru_lang: Lang
+    ):
+        reviewer = Reviewer(
+            en_lang,
+            ru_lang,
+            None,
+            None,
+            None,
+            "Extra instruction.",
+            "Ref text.",
+            None,
+            None,
+        )
+        result = reviewer._build_system_prompt(
+            user_glossary_str="user term = user translation",
+            auto_glossary_str="",
+        )
+        assert result.index("<reference document>") > result.index(
+            "<user dictionary end>"
+        )
+        assert result.index("Additional instructions from the user:") > result.index(
+            "</reference document>"
+        )
+
+    def test_no_ref_doc_when_not_provided(self, en_lang: Lang, ru_lang: Lang):
+        reviewer = Reviewer(en_lang, ru_lang, None, None, None, None, None, None, None)
+        result = reviewer._build_system_prompt(
+            user_glossary_str="",
+            auto_glossary_str="",
+        )
+        assert "reference document" not in result

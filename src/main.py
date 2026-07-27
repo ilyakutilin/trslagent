@@ -275,6 +275,8 @@ async def main(cfg: Settings) -> PipelineResult | None:
             doc_type=cfg.input_data.doc_type,
             doc_title=cfg.input_data.doc_title,
             additional_instructions=cfg.input_data.additional_instructions,
+            ref_source_text=cfg.input_data.ref_source_text,
+            ref_target_text=cfg.input_data.ref_target_text,
             llm=llm,
         )
 
@@ -508,6 +510,8 @@ async def main(cfg: Settings) -> PipelineResult | None:
         doc_type=cfg.input_data.doc_type,
         doc_title=cfg.input_data.doc_title,
         additional_instructions=cfg.input_data.additional_instructions,
+        ref_source_text=cfg.input_data.ref_source_text,
+        ref_target_text=cfg.input_data.ref_target_text,
         llm=llm,
     )
 

@@ -163,6 +163,157 @@ class TestInputData:
         )
         assert data.additional_instructions == "Be precise."
 
+    def test_ref_source_default_none(self, tmp_path):
+        fp = tmp_path / "source.txt"
+        fp.write_text("source")
+        data = InputData(
+            source_lang=Lang("en"),
+            target_lang=Lang("ru"),
+            source_file_path=fp,
+        )
+        assert data.ref_source_file_path is None
+        assert data.ref_source_text is None
+
+    def test_ref_target_default_none(self, tmp_path):
+        fp = tmp_path / "source.txt"
+        fp.write_text("source")
+        data = InputData(
+            source_lang=Lang("en"),
+            target_lang=Lang("ru"),
+            source_file_path=fp,
+        )
+        assert data.ref_target_file_path is None
+        assert data.ref_target_text is None
+
+    def test_ref_source_reads_from_file(self, tmp_path):
+        fp = tmp_path / "source.txt"
+        fp.write_text("source")
+        ref_fp = tmp_path / "ref_source.txt"
+        ref_fp.write_text("This is a reference doc.")
+        data = InputData(
+            source_lang=Lang("en"),
+            target_lang=Lang("ru"),
+            source_file_path=fp,
+            ref_source_file_path=ref_fp,
+        )
+        assert data.ref_source_text == "This is a reference doc."
+
+    def test_ref_target_reads_from_file(self, tmp_path):
+        fp = tmp_path / "source.txt"
+        fp.write_text("source")
+        ref_fp = tmp_path / "ref_target.txt"
+        ref_fp.write_text("Это справочный документ.")
+        data = InputData(
+            source_lang=Lang("en"),
+            target_lang=Lang("ru"),
+            source_file_path=fp,
+            ref_target_file_path=ref_fp,
+        )
+        assert data.ref_target_text == "Это справочный документ."
+
+    def test_ref_source_and_target_read_from_files(self, tmp_path):
+        fp = tmp_path / "source.txt"
+        fp.write_text("source")
+        ref_src = tmp_path / "ref_source.txt"
+        ref_src.write_text("Source reference")
+        ref_tgt = tmp_path / "ref_target.txt"
+        ref_tgt.write_text("Target reference")
+        data = InputData(
+            source_lang=Lang("en"),
+            target_lang=Lang("ru"),
+            source_file_path=fp,
+            ref_source_file_path=ref_src,
+            ref_target_file_path=ref_tgt,
+        )
+        assert data.ref_source_text == "Source reference"
+        assert data.ref_target_text == "Target reference"
+
+    def test_ref_max_length_default(self, tmp_path):
+        fp = tmp_path / "source.txt"
+        fp.write_text("source")
+        data = InputData(
+            source_lang=Lang("en"),
+            target_lang=Lang("ru"),
+            source_file_path=fp,
+        )
+        assert data.ref_max_length == 10000
+
+    def test_ref_source_truncated_when_exceeds_max_length(self, tmp_path):
+        fp = tmp_path / "source.txt"
+        fp.write_text("source")
+        ref_fp = tmp_path / "ref_source.txt"
+        ref_fp.write_text("x" * 500)
+        data = InputData(
+            source_lang=Lang("en"),
+            target_lang=Lang("ru"),
+            source_file_path=fp,
+            ref_source_file_path=ref_fp,
+            ref_max_length=100,
+        )
+        assert data.ref_source_text is not None
+        assert len(data.ref_source_text) == 100
+
+    def test_ref_target_truncated_when_exceeds_max_length(self, tmp_path):
+        fp = tmp_path / "source.txt"
+        fp.write_text("source")
+        ref_fp = tmp_path / "ref_target.txt"
+        ref_fp.write_text("x" * 500)
+        data = InputData(
+            source_lang=Lang("en"),
+            target_lang=Lang("ru"),
+            source_file_path=fp,
+            ref_target_file_path=ref_fp,
+            ref_max_length=50,
+        )
+        assert data.ref_target_text is not None
+        assert len(data.ref_target_text) == 50
+
+    def test_ref_source_short_text_not_truncated(self, tmp_path):
+        fp = tmp_path / "source.txt"
+        fp.write_text("source")
+        ref_fp = tmp_path / "ref_source.txt"
+        ref_fp.write_text("Short ref")
+        data = InputData(
+            source_lang=Lang("en"),
+            target_lang=Lang("ru"),
+            source_file_path=fp,
+            ref_source_file_path=ref_fp,
+            ref_max_length=100,
+        )
+        assert data.ref_source_text == "Short ref"
+
+    def test_ref_source_inline_text_not_truncated(self):
+        data = InputData(
+            source_lang=Lang("en"),
+            target_lang=Lang("ru"),
+            source_text="source",
+            ref_source_text="Short inline ref",
+        )
+        assert data.ref_source_text == "Short inline ref"
+
+    def test_ref_source_inline_text_truncated(self):
+        data = InputData(
+            source_lang=Lang("en"),
+            target_lang=Lang("ru"),
+            source_text="source",
+            ref_source_text="x" * 500,
+            ref_max_length=100,
+        )
+        assert data.ref_source_text is not None
+        assert len(data.ref_source_text) == 100
+
+    def test_ref_max_length_does_not_affect_source_text(self, tmp_path):
+        fp = tmp_path / "source.txt"
+        fp.write_text("x" * 500)
+        data = InputData(
+            source_lang=Lang("en"),
+            target_lang=Lang("ru"),
+            source_file_path=fp,
+            ref_max_length=100,
+        )
+        assert data.source_text is not None
+        assert len(data.source_text) == 500
+
 
 class TestOutputData:
     FROZEN_NOW = datetime.datetime(2025, 1, 15, 12, 30, 45)

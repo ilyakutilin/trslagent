@@ -174,6 +174,8 @@ def _patch_toml_for_attachments(
     id_section.pop("source_file_path", None)
     id_section.pop("target_file_path", None)
     id_section.pop("user_glossary_file_path", None)
+    id_section.pop("ref_source_file_path", None)
+    id_section.pop("ref_target_file_path", None)
     data["input_data"] = id_section
 
     lines: list[str] = []
@@ -223,6 +225,8 @@ def build_settings_from_email(
     source_text: str | None = None
     target_text: str | None = None
     glossary_lines: list[str] | None = None
+    ref_source_text: str | None = None
+    ref_target_text: str | None = None
 
     MATCH_TRIGGER = "@match-glossary"
     match_glossary_only = False
@@ -243,6 +247,12 @@ def build_settings_from_email(
 
     if "glossary.txt" in attachment_bodies:
         glossary_lines = attachment_bodies["glossary.txt"].decode("utf-8").splitlines()
+
+    if "ref_source.txt" in attachment_bodies:
+        ref_source_text = attachment_bodies["ref_source.txt"].decode("utf-8")
+
+    if "ref_target.txt" in attachment_bodies:
+        ref_target_text = attachment_bodies["ref_target.txt"].decode("utf-8")
 
     if "config.toml" in attachment_bodies:
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -266,6 +276,12 @@ def build_settings_from_email(
         if glossary_lines is not None:
             settings.input_data.user_glossary_lines = glossary_lines
 
+        if ref_source_text is not None:
+            settings.input_data.ref_source_text = ref_source_text
+
+        if ref_target_text is not None:
+            settings.input_data.ref_target_text = ref_target_text
+
         settings.input_data.match_glossary_only = match_glossary_only
 
         return settings
@@ -275,6 +291,8 @@ def build_settings_from_email(
     settings.input_data.source_text = None
     settings.input_data.target_text = None
     settings.input_data.user_glossary_lines = None
+    settings.input_data.ref_source_text = None
+    settings.input_data.ref_target_text = None
 
     if source_text is not None:
         settings.input_data.source_text = source_text
@@ -286,6 +304,12 @@ def build_settings_from_email(
 
     if glossary_lines is not None:
         settings.input_data.user_glossary_lines = glossary_lines
+
+    if ref_source_text is not None:
+        settings.input_data.ref_source_text = ref_source_text
+
+    if ref_target_text is not None:
+        settings.input_data.ref_target_text = ref_target_text
 
     settings.input_data.match_glossary_only = match_glossary_only
 

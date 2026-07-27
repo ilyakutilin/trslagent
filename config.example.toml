@@ -9,6 +9,9 @@ source_file_path = "files/source.txt"
 # target_file_path = "files/target.txt"
 # auto_glossary = true
 # user_glossary_file_path = "files/glossary.txt"
+# ref_source_file_path = "files/ref_source.txt"
+# ref_target_file_path = "files/ref_target.txt"
+# ref_max_length = 10000
 
 [output_data]
 # result_file_path = "files/result.md"

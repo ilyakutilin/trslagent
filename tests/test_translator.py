@@ -15,6 +15,8 @@ def translator(en_lang: Lang, ru_lang: Lang) -> Translator:
         doc_type=None,
         doc_title=None,
         additional_instructions=None,
+        ref_source_text=None,
+        ref_target_text=None,
         llm=None,
     )
 
@@ -174,6 +176,8 @@ class TestTranslateChunkAsync:
             doc_type=None,
             doc_title=None,
             additional_instructions=None,
+            ref_source_text=None,
+            ref_target_text=None,
             llm=mock_llm,
         )
 
@@ -263,3 +267,100 @@ class TestTranslateChunkAsync:
         call_kwargs = mock_llm.get_reply_async.call_args.kwargs
         assert "Additional instructions from the user:" in call_kwargs["system_prompt"]
         assert "Keep it concise." in call_kwargs["system_prompt"]
+
+
+class TestBuildSystemPromptWithRefDoc:
+    def test_ref_source_only_in_prompt(self, en_lang: Lang, ru_lang: Lang):
+        t = Translator(
+            source_lang=en_lang,
+            target_lang=ru_lang,
+            specialized_in=None,
+            doc_type=None,
+            doc_title=None,
+            additional_instructions=None,
+            ref_source_text="Reference source text here.",
+            ref_target_text=None,
+            llm=None,
+        )
+        result = t._build_system_prompt(
+            is_extract=False,
+            user_glossary_str="",
+            auto_glossary_str="",
+        )
+        assert "reference document" in result
+        assert "Reference source text here." in result
+        assert "English:" in result
+        ref_section_start = result.index("<reference document>")
+        ref_section_end = result.index("</reference document>")
+        ref_section = result[ref_section_start:ref_section_end]
+        assert "English:" in ref_section
+        assert "Russian:" not in ref_section
+
+    def test_ref_source_and_target_in_prompt(self, en_lang: Lang, ru_lang: Lang):
+        t = Translator(
+            source_lang=en_lang,
+            target_lang=ru_lang,
+            specialized_in=None,
+            doc_type=None,
+            doc_title=None,
+            additional_instructions=None,
+            ref_source_text="Source ref.",
+            ref_target_text="Target ref.",
+            llm=None,
+        )
+        result = t._build_system_prompt(
+            is_extract=False,
+            user_glossary_str="",
+            auto_glossary_str="",
+        )
+        assert "reference document" in result
+        assert "Source ref." in result
+        assert "Target ref." in result
+        assert "English:" in result
+        assert "Russian:" in result
+        assert result.index("English:") < result.index("Russian:")
+
+    def test_ref_doc_after_glossary_and_before_additional_instructions(
+        self, en_lang: Lang, ru_lang: Lang
+    ):
+        t = Translator(
+            source_lang=en_lang,
+            target_lang=ru_lang,
+            specialized_in=None,
+            doc_type=None,
+            doc_title=None,
+            additional_instructions="Extra instruction.",
+            ref_source_text="Ref text.",
+            ref_target_text=None,
+            llm=None,
+        )
+        result = t._build_system_prompt(
+            is_extract=False,
+            user_glossary_str="user term = user translation",
+            auto_glossary_str="",
+        )
+        assert result.index("<reference document>") > result.index(
+            "<user dictionary end>"
+        )
+        assert result.index("Additional instructions from the user:") > result.index(
+            "</reference document>"
+        )
+
+    def test_no_ref_doc_when_not_provided(self, en_lang: Lang, ru_lang: Lang):
+        t = Translator(
+            source_lang=en_lang,
+            target_lang=ru_lang,
+            specialized_in=None,
+            doc_type=None,
+            doc_title=None,
+            additional_instructions=None,
+            ref_source_text=None,
+            ref_target_text=None,
+            llm=None,
+        )
+        result = t._build_system_prompt(
+            is_extract=False,
+            user_glossary_str="",
+            auto_glossary_str="",
+        )
+        assert "reference document" not in result

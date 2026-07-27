@@ -25,6 +25,8 @@ class Reviewer:
         doc_type: Optional document type for context
         doc_title: Optional document title for context
         additional_instructions: Optional extra instructions for the LLM
+        ref_source_text: Optional reference document text in source language
+        ref_target_text: Optional reference document text in target language
         llm: LLM instance for generating reviews. If None, will only output prompts
     """
 
@@ -36,6 +38,8 @@ class Reviewer:
         doc_type: str | None,
         doc_title: str | None,
         additional_instructions: str | None,
+        ref_source_text: str | None,
+        ref_target_text: str | None,
         llm: LLM | None,
     ) -> None:
         self.source_lang = source_lang
@@ -44,12 +48,16 @@ class Reviewer:
         self.doc_type = doc_type
         self.doc_title = doc_title
         self.additional_instructions = additional_instructions
+        self.ref_source_text = ref_source_text
+        self.ref_target_text = ref_target_text
         self.llm = llm
 
         logger.info(
             f"Reviewer initialized: {source_lang.name} -> {target_lang.name}, "
             f"specialized_in={specialized_in}, "
             f"doc_type={doc_type}, doc_title={doc_title}, "
+            f"ref_source_len={len(ref_source_text) if ref_source_text else 0}, "
+            f"ref_target_len={len(ref_target_text) if ref_target_text else 0}, "
             f"llm_available={llm is not None}"
         )
 
@@ -115,6 +123,22 @@ class Reviewer:
             "As a result provide a list of mistakes and potential "
             "improvements to the translation."
         )
+
+        ref_parts: list[str] = []
+        if self.ref_source_text:
+            ref_parts.append(f"{self.source_lang.name}:\n{self.ref_source_text}")
+        if self.ref_target_text:
+            ref_parts.append(f"{self.target_lang.name}:\n{self.ref_target_text}")
+        if ref_parts:
+            result += (
+                "\n\nThe user has provided a reference document for additional "
+                "context. This document is related to the text being reviewed "
+                "and should be used as a source of truth for terminology, style, "
+                "and overall context. You may quote from it where applicable.\n"
+                f"<reference document>\n{'\n\n'.join(ref_parts)}\n"
+                "</reference document>"
+            )
+
         if self.additional_instructions:
             result += f"\nAdditional instructions from the user:\n{self.additional_instructions}"
         logger.debug(f"Built system prompt: {result}")

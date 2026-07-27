@@ -253,11 +253,15 @@ class TestPatchTomlForAttachments:
             "[input_data]\n" + SRC_TRG_TOML + 'source_file_path = "/some/path"\n'
             'target_file_path = "/other/path"\n'
             'user_glossary_file_path = "/glossary/path"\n'
+            'ref_source_file_path = "/ref/src/path"\n'
+            'ref_target_file_path = "/ref/tgt/path"\n'
         )
         result = _patch_toml_for_attachments(toml, None, None, None)
         assert "source_file_path" not in result
         assert "target_file_path" not in result
         assert "user_glossary_file_path" not in result
+        assert "ref_source_file_path" not in result
+        assert "ref_target_file_path" not in result
 
     def test_preserves_other_sections(self):
         toml = (
@@ -411,3 +415,67 @@ class TestBuildSettingsFromEmail:
             default_cfg=cfg,
         )
         assert result.input_data.source_text == "Attachment source"
+
+    def test_with_ref_source_txt_attachment(self):
+        cfg = _make_default_settings()
+        result = build_settings_from_email(
+            attachment_bodies={
+                "source.txt": b"source",
+                "ref_source.txt": b"Reference source text",
+            },
+            email_body="",
+            default_cfg=cfg,
+        )
+        assert result.input_data.ref_source_text == "Reference source text"
+
+    def test_with_ref_target_txt_attachment(self):
+        cfg = _make_default_settings()
+        result = build_settings_from_email(
+            attachment_bodies={
+                "source.txt": b"source",
+                "ref_target.txt": b"Reference target text",
+            },
+            email_body="",
+            default_cfg=cfg,
+        )
+        assert result.input_data.ref_target_text == "Reference target text"
+
+    def test_with_both_ref_attachments(self):
+        cfg = _make_default_settings()
+        result = build_settings_from_email(
+            attachment_bodies={
+                "source.txt": b"source",
+                "ref_source.txt": b"Source ref",
+                "ref_target.txt": b"Target ref",
+            },
+            email_body="",
+            default_cfg=cfg,
+        )
+        assert result.input_data.ref_source_text == "Source ref"
+        assert result.input_data.ref_target_text == "Target ref"
+
+    def test_ref_text_none_when_no_ref_attachments(self):
+        cfg = _make_default_settings()
+        result = build_settings_from_email(
+            attachment_bodies={"source.txt": b"source"},
+            email_body="",
+            default_cfg=cfg,
+        )
+        assert result.input_data.ref_source_text is None
+        assert result.input_data.ref_target_text is None
+
+    def test_with_config_toml_and_ref_attachments(self):
+        cfg = _make_default_settings()
+        config_toml = "[input_data]\n" + SRC_TRG_TOML
+        result = build_settings_from_email(
+            attachment_bodies={
+                "config.toml": config_toml.encode("utf-8"),
+                "source.txt": b"source",
+                "ref_source.txt": b"Config ref source",
+                "ref_target.txt": b"Config ref target",
+            },
+            email_body="",
+            default_cfg=cfg,
+        )
+        assert result.input_data.ref_source_text == "Config ref source"
+        assert result.input_data.ref_target_text == "Config ref target"
