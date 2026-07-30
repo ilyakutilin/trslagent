@@ -12,7 +12,7 @@ from openai import APIConnectionError, APITimeoutError, OpenAI, RateLimitError
 from openai.types import ReasoningEffort
 from openai.types.chat import ChatCompletionMessageParam
 
-from src.config import CostSettings, logger
+from src.config import CostSettings, Settings, logger
 
 
 class LLM:
@@ -227,6 +227,8 @@ async def fetch_cost(
             response = await client.get(url, headers=headers)
             response.raise_for_status()
             data = response.json()
+    # TODO: If not found, sleep 3 seconds and retry 3 times. Only then fail.
+    # TODO: Show the error type and text in the logs.
     except Exception:
         logger.warning(
             f"Failed to fetch cost for completion {completion_id}: {url}",
@@ -248,3 +250,58 @@ async def fetch_cost(
         )
         return None
     return float(value)
+
+
+async def resolve_and_log_cost(
+    completion_ids: list[str],
+    api_key: str,
+    cfg: Settings,
+) -> tuple[float | None, str, int]:
+    """Fetch and log the total cost of all LLM completions.
+
+    Fetches costs concurrently for each completion ID via the generation info URL.
+    Logs warnings for failed fetches and returns aggregate totals.
+
+    Args:
+        completion_ids: List of LLM completion IDs to query cost for.
+        api_key: API key for authentication.
+        cfg: Application settings containing cost configuration.
+
+    Returns:
+        A tuple of (total_cost_or_None, currency, unknown_count), where
+        total_cost_or_None is the sum of known costs (None if all are unknown),
+        currency is the cost currency code, and unknown_count is the number of
+        completions whose cost could not be resolved.
+    """
+    if not cfg.cost.generation_info_url:
+        return None, cfg.cost.cost_currency, 0
+    if not completion_ids:
+        return None, cfg.cost.cost_currency, 0
+
+    cost_tasks = [fetch_cost(cid, api_key, cfg.cost) for cid in completion_ids]
+    cost_results = await asyncio.gather(*cost_tasks, return_exceptions=True)
+
+    known_costs: list[float] = []
+    unknown_count = 0
+    for i, c in enumerate(cost_results):
+        if isinstance(c, BaseException):
+            logger.warning(f"Cost fetch failed for completion {completion_ids[i]}: {c}")
+            unknown_count += 1
+        elif c is None:
+            unknown_count += 1
+        else:
+            known_costs.append(c)
+
+    known_total = sum(known_costs) if known_costs else 0.0
+    if unknown_count > 0 and not known_costs:
+        logger.info("Cost: UNKNOWN")
+        return None, cfg.cost.cost_currency, unknown_count
+    elif unknown_count > 0:
+        logger.info(
+            f"Cost: {known_total:.2f} {cfg.cost.cost_currency}"
+            f" ({unknown_count}/{len(completion_ids)} unknown)"
+        )
+    else:
+        logger.info(f"Cost: {known_total:.2f} {cfg.cost.cost_currency}")
+
+    return known_total if known_costs else None, cfg.cost.cost_currency, unknown_count

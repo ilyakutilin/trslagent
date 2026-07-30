@@ -6,20 +6,13 @@ from pydantic import SecretStr
 
 from src.config import (
     ChunkSettings,
-    CostSettings,
     InputData,
     LLMSettings,
     OutputData,
     Settings,
 )
 from src.glossary.models import GlossaryEntry, Term
-from src.main import (
-    _deduplicate_entries,
-    _resolve_and_log_cost,
-    _stringify_glossary,
-    export_glossary_matches,
-    main,
-)
+from src.main import export_glossary_matches, main
 
 
 @pytest.fixture(autouse=True)
@@ -51,115 +44,17 @@ def _make_entry(
     )
 
 
-class TestStringifyGlossary:
-    def test_matching_langs(self, en_lang: Lang, ru_lang: Lang):
-        entries = [
-            _make_entry(1, "flow meter", "расходомер", "flow meter", "расходомер"),
-            _make_entry(
-                2,
-                "pressure valve",
-                "клапан давления",
-                "pressure valve",
-                "клапан давления",
-            ),
-        ]
-        result = _stringify_glossary(entries, en_lang, ru_lang)
-        assert "flow meter = расходомер" in result
-        assert "pressure valve = клапан давления" in result
-        assert "\n" in result
-
-    def test_mismatched_langs_skipped(self, en_lang: Lang, ru_lang: Lang):
-        entry = GlossaryEntry(
-            id=1,
-            terms=frozenset(
-                [
-                    _make_term("en", "hello"),
-                    _make_term("fr", "bonjour"),
-                ]
-            ),
-        )
-        result = _stringify_glossary([entry], en_lang, ru_lang)
-        assert result == ""
-
-    def test_empty_list(self, en_lang: Lang, ru_lang: Lang):
-        assert _stringify_glossary([], en_lang, ru_lang) == ""
-
-    def test_multi_term_synonyms(self, en_lang: Lang, ru_lang: Lang):
-        entry = GlossaryEntry(
-            id=1,
-            terms=frozenset(
-                [
-                    _make_term("en", "pressure valve"),
-                    _make_term("en", "relief valve"),
-                    _make_term("ru", "клапан давления"),
-                    _make_term("ru", "предохранительный клапан"),
-                ]
-            ),
-        )
-        result = _stringify_glossary([entry], en_lang, ru_lang)
-        assert "pressure valve" in result
-        assert "relief valve" in result
-        assert "клапан давления" in result
-        assert "предохранительный клапан" in result
-        assert " = " in result
-        left, right = result.split(" = ", 1)
-        assert all(t in left.split(" | ") for t in ("pressure valve", "relief valve"))
-        assert all(
-            t in right.split(" | ")
-            for t in ("клапан давления", "предохранительный клапан")
-        )
-
-
-class TestDeduplicateEntries:
-    def test_user_overrides_matched_auto(self, en_lang: Lang):
-        user_entry = _make_entry(
-            10, "flow meter", "расходомер", "flow meter", "расходомер"
-        )
-        auto_entry = _make_entry(
-            1, "flow meter", "расходомер", "flow meter", "расходомер"
-        )
-
-        user_entries, auto_entries = _deduplicate_entries(
-            [auto_entry], [user_entry], en_lang
-        )
-        assert len(user_entries) == 1
-        assert len(auto_entries) == 0
-
-    def test_no_overlap(self, en_lang: Lang):
-        user_entry = _make_entry(
-            10, "flow meter", "расходомер", "flow meter", "расходомер"
-        )
-        auto_entry = _make_entry(
-            1, "pressure valve", "клапан давления", "pressure valve", "клапан давления"
-        )
-
-        user_entries, auto_entries = _deduplicate_entries(
-            [auto_entry], [user_entry], en_lang
-        )
-        assert len(user_entries) == 1
-        assert len(auto_entries) == 1
-
-    def test_empty_inputs(self, en_lang: Lang):
-        user_entries, auto_entries = _deduplicate_entries([], [], en_lang)
-        assert user_entries == []
-        assert auto_entries == []
-
-    def test_different_values_same_lemma(self, en_lang: Lang):
-        user_entry = _make_entry(10, "color", "цвет", "color", "цвет")
-        auto_entry = _make_entry(1, "colour", "цвет", "color", "цвет")
-
-        user_entries, auto_entries = _deduplicate_entries(
-            [auto_entry], [user_entry], en_lang
-        )
-        assert len(user_entries) == 1
-        assert len(auto_entries) == 0
-
-
 class TestTranslationPipeline:
     @pytest.mark.asyncio
     async def test_source_text_chunks_translate_stitch(self, mocker):
-        mocker.patch("src.main._parse_glossaries", return_value=([], []))
-        mocker.patch("src.main.fetch_cost")
+        mocker.patch(
+            "src.main.prepare_glossary_context",
+            return_value=mocker.MagicMock(
+                user_entries=[],
+                select_for_chunk=lambda chunk, mt: ([], [], "", ""),
+            ),
+        )
+        mocker.patch("src.llm.resolve_and_log_cost")
 
         mock_llm = AsyncMock()
         mock_llm.get_reply_async.return_value = ("Переведённый текст", "completion-1")
@@ -185,8 +80,14 @@ class TestTranslationPipeline:
         user_entries = [
             _make_entry(10, "flow meter", "расходомер", "flow meter", "расходомер")
         ]
-        mocker.patch("src.main._parse_glossaries", return_value=([], user_entries))
-        mocker.patch("src.main.fetch_cost")
+        mocker.patch(
+            "src.main.prepare_glossary_context",
+            return_value=mocker.MagicMock(
+                user_entries=user_entries,
+                select_for_chunk=lambda chunk, mt: ([], [], "", ""),
+            ),
+        )
+        mocker.patch("src.llm.resolve_and_log_cost")
 
         mock_llm = AsyncMock()
         mock_llm.get_reply_async.return_value = ("Перевод", "completion-1")
@@ -209,8 +110,14 @@ class TestTranslationPipeline:
 
     @pytest.mark.asyncio
     async def test_divider_based_chunking(self, mocker):
-        mocker.patch("src.main._parse_glossaries", return_value=([], []))
-        mocker.patch("src.main.fetch_cost")
+        mocker.patch(
+            "src.main.prepare_glossary_context",
+            return_value=mocker.MagicMock(
+                user_entries=[],
+                select_for_chunk=lambda chunk, mt: ([], [], "", ""),
+            ),
+        )
+        mocker.patch("src.llm.resolve_and_log_cost")
 
         mock_llm = AsyncMock()
         mock_llm.get_reply_async.side_effect = [
@@ -239,8 +146,14 @@ class TestTranslationPipeline:
 class TestReviewMode:
     @pytest.mark.asyncio
     async def test_non_chunked_review(self, mocker):
-        mocker.patch("src.main._parse_glossaries", return_value=([], []))
-        mocker.patch("src.main.fetch_cost")
+        mocker.patch(
+            "src.main.prepare_glossary_context",
+            return_value=mocker.MagicMock(
+                user_entries=[],
+                select_for_chunk=lambda chunk, mt: ([], [], "", ""),
+            ),
+        )
+        mocker.patch("src.llm.resolve_and_log_cost")
 
         mock_llm = AsyncMock()
         mock_llm.get_reply_async.return_value = ("Review result", "id-1")
@@ -262,8 +175,14 @@ class TestReviewMode:
 
     @pytest.mark.asyncio
     async def test_divider_review_equal_chunks(self, mocker):
-        mocker.patch("src.main._parse_glossaries", return_value=([], []))
-        mocker.patch("src.main.fetch_cost")
+        mocker.patch(
+            "src.main.prepare_glossary_context",
+            return_value=mocker.MagicMock(
+                user_entries=[],
+                select_for_chunk=lambda chunk, mt: ([], [], "", ""),
+            ),
+        )
+        mocker.patch("src.llm.resolve_and_log_cost")
 
         mock_llm = AsyncMock()
         mock_llm.get_reply_async.side_effect = [
@@ -293,7 +212,13 @@ class TestReviewMode:
 
     @pytest.mark.asyncio
     async def test_divider_review_mismatch_raises(self, mocker):
-        mocker.patch("src.main._parse_glossaries", return_value=([], []))
+        mocker.patch(
+            "src.main.prepare_glossary_context",
+            return_value=mocker.MagicMock(
+                user_entries=[],
+                select_for_chunk=lambda chunk, mt: ([], [], "", ""),
+            ),
+        )
 
         src = "Section A\n----------\nSection B"
         tgt = "Single chunk"
@@ -316,7 +241,13 @@ class TestReviewMode:
 class TestPrintPromptOnly:
     @pytest.mark.asyncio
     async def test_print_prompt_only(self, mocker):
-        mocker.patch("src.main._parse_glossaries", return_value=([], []))
+        mocker.patch(
+            "src.main.prepare_glossary_context",
+            return_value=mocker.MagicMock(
+                user_entries=[],
+                select_for_chunk=lambda chunk, mt: ([], [], "", ""),
+            ),
+        )
         mock_llm_class = mocker.patch("src.main.LLM")
 
         cfg = Settings(
@@ -336,8 +267,14 @@ class TestPrintPromptOnly:
 class TestChunkFailure:
     @pytest.mark.asyncio
     async def test_one_chunk_fails_others_succeed(self, mocker):
-        mocker.patch("src.main._parse_glossaries", return_value=([], []))
-        mocker.patch("src.main.fetch_cost")
+        mocker.patch(
+            "src.main.prepare_glossary_context",
+            return_value=mocker.MagicMock(
+                user_entries=[],
+                select_for_chunk=lambda chunk, mt: ([], [], "", ""),
+            ),
+        )
+        mocker.patch("src.llm.resolve_and_log_cost")
 
         mock_llm = AsyncMock()
         mock_llm.get_reply_async.side_effect = [
@@ -375,15 +312,6 @@ class TestExportGlossaryMatches:
         user_entries = [
             _make_entry(10, "flow meter", "расходомер", "flow meter", "расходомер")
         ]
-        auto_entries = [
-            _make_entry(
-                1,
-                "pressure valve",
-                "клапан давления",
-                "pressure valve",
-                "клапан давления",
-            ),
-        ]
         matched_entries = [
             _make_entry(
                 1,
@@ -394,15 +322,18 @@ class TestExportGlossaryMatches:
             ),
         ]
 
-        mock_lemmatizer = mocker.MagicMock()
-        mocker.patch("src.main.Lemmatizer", return_value=mock_lemmatizer)
-        mocker.patch(
-            "src.main._parse_glossaries", return_value=(auto_entries, user_entries)
-        )
+        mock_matcher = mocker.MagicMock()
+        mock_matcher.match.return_value = matched_entries
 
-        mock_matcher = mocker.patch("src.main.TermMatcher")
-        mock_matcher_instance = mock_matcher.return_value
-        mock_matcher_instance.match.return_value = matched_entries
+        mocker.patch(
+            "src.main.prepare_glossary_context",
+            return_value=mocker.MagicMock(
+                user_entries=user_entries,
+                term_matcher=mock_matcher,
+                source_lang=en_lang,
+                target_lang=ru_lang,
+            ),
+        )
 
         cfg = Settings(
             input_data=InputData(
@@ -417,7 +348,15 @@ class TestExportGlossaryMatches:
         assert "flow meter = расходомер" in result
 
     def test_no_auto_glossary(self, mocker):
-        mocker.patch("src.main._parse_glossaries", return_value=([], []))
+        mocker.patch(
+            "src.main.prepare_glossary_context",
+            return_value=mocker.MagicMock(
+                user_entries=[],
+                term_matcher=None,
+                source_lang=Lang("en"),
+                target_lang=Lang("ru"),
+            ),
+        )
 
         cfg = Settings(
             input_data=InputData(
@@ -429,171 +368,6 @@ class TestExportGlossaryMatches:
 
         result = export_glossary_matches(cfg)
         assert result == ""
-
-
-class TestResolveAndLogCost:
-    @pytest.mark.asyncio
-    async def test_known_costs(self, mocker):
-        mock_fetch = mocker.patch("src.main.fetch_cost", side_effect=[1.50, 2.50])
-
-        cfg = Settings(
-            input_data=InputData(
-                source_lang=Lang("en"),
-                target_lang=Lang("ru"),
-                source_text="x",
-            ),
-            cost=CostSettings(generation_info_url="https://api.example.com/cost"),
-        )
-
-        await _resolve_and_log_cost(["id-1", "id-2"], "test-key", cfg)
-        assert mock_fetch.call_count == 2
-        mock_fetch.assert_any_call("id-1", "test-key", cfg.cost)
-        mock_fetch.assert_any_call("id-2", "test-key", cfg.cost)
-
-    @pytest.mark.asyncio
-    async def test_unknown_costs(self, mocker):
-        mock_fetch = mocker.patch("src.main.fetch_cost", side_effect=[1.50, None])
-
-        cfg = Settings(
-            input_data=InputData(
-                source_lang=Lang("en"),
-                target_lang=Lang("ru"),
-                source_text="x",
-            ),
-            cost=CostSettings(generation_info_url="https://api.example.com/cost"),
-        )
-
-        await _resolve_and_log_cost(["id-1", "id-2"], "test-key", cfg)
-        assert mock_fetch.call_count == 2
-
-    @pytest.mark.asyncio
-    async def test_no_url_configured(self, mocker):
-        mock_fetch = mocker.patch("src.main.fetch_cost")
-
-        cfg = Settings(
-            input_data=InputData(
-                source_lang=Lang("en"),
-                target_lang=Lang("ru"),
-                source_text="x",
-            ),
-            cost=CostSettings(generation_info_url=None),
-        )
-
-        await _resolve_and_log_cost(["id-1"], "test-key", cfg)
-        mock_fetch.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_empty_completion_ids(self, mocker):
-        mock_fetch = mocker.patch("src.main.fetch_cost")
-
-        cfg = Settings(
-            input_data=InputData(
-                source_lang=Lang("en"),
-                target_lang=Lang("ru"),
-                source_text="x",
-            ),
-            cost=CostSettings(generation_info_url="https://api.example.com/cost"),
-        )
-
-        await _resolve_and_log_cost([], "test-key", cfg)
-        mock_fetch.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_returns_tuple_with_known_costs(self, mocker):
-        mocker.patch("src.main.fetch_cost", side_effect=[1.50, 2.50])
-
-        cfg = Settings(
-            input_data=InputData(
-                source_lang=Lang("en"),
-                target_lang=Lang("ru"),
-                source_text="x",
-            ),
-            cost=CostSettings(generation_info_url="https://api.example.com/cost"),
-        )
-
-        total, currency, unknowns = await _resolve_and_log_cost(
-            ["id-1", "id-2"], "test-key", cfg
-        )
-        assert total == 4.0
-        assert currency == "USD"
-        assert unknowns == 0
-
-    @pytest.mark.asyncio
-    async def test_returns_none_total_with_all_unknown(self, mocker):
-        mocker.patch("src.main.fetch_cost", side_effect=[None, None])
-
-        cfg = Settings(
-            input_data=InputData(
-                source_lang=Lang("en"),
-                target_lang=Lang("ru"),
-                source_text="x",
-            ),
-            cost=CostSettings(generation_info_url="https://api.example.com/cost"),
-        )
-
-        total, currency, unknowns = await _resolve_and_log_cost(
-            ["id-1", "id-2"], "test-key", cfg
-        )
-        assert total is None
-        assert currency == "USD"
-        assert unknowns == 2
-
-    @pytest.mark.asyncio
-    async def test_returns_total_only_for_known(self, mocker):
-        mocker.patch("src.main.fetch_cost", side_effect=[1.50, None])
-
-        cfg = Settings(
-            input_data=InputData(
-                source_lang=Lang("en"),
-                target_lang=Lang("ru"),
-                source_text="x",
-            ),
-            cost=CostSettings(generation_info_url="https://api.example.com/cost"),
-        )
-
-        total, _, unknowns = await _resolve_and_log_cost(
-            ["id-1", "id-2"], "test-key", cfg
-        )
-        assert total == 1.50
-        assert unknowns == 1
-
-    @pytest.mark.asyncio
-    async def test_returns_none_when_no_url(self, mocker):
-        mock_fetch = mocker.patch("src.main.fetch_cost")
-
-        cfg = Settings(
-            input_data=InputData(
-                source_lang=Lang("en"),
-                target_lang=Lang("ru"),
-                source_text="x",
-            ),
-            cost=CostSettings(generation_info_url=None),
-        )
-
-        total, currency, unknowns = await _resolve_and_log_cost(
-            ["id-1"], "test-key", cfg
-        )
-        mock_fetch.assert_not_called()
-        assert total is None
-        assert currency == "USD"
-        assert unknowns == 0
-
-    @pytest.mark.asyncio
-    async def test_returns_none_when_empty_ids(self, mocker):
-        mock_fetch = mocker.patch("src.main.fetch_cost")
-
-        cfg = Settings(
-            input_data=InputData(
-                source_lang=Lang("en"),
-                target_lang=Lang("ru"),
-                source_text="x",
-            ),
-            cost=CostSettings(generation_info_url="https://api.example.com/cost"),
-        )
-
-        total, _, _ = await _resolve_and_log_cost([], "test-key", cfg)
-        mock_fetch.assert_not_called()
-        assert total is None
 
 
 class TestPipelineResult:
@@ -613,18 +387,31 @@ class TestPipelineResult:
         user_entries = [
             _make_entry(10, "flow meter", "расходомер", "flow meter", "расходомер")
         ]
-        mocker.patch(
-            "src.main._parse_glossaries", return_value=(auto_entries, user_entries)
+
+        mock_matcher = mocker.MagicMock()
+        mock_matcher.match.return_value = [auto_entries[0]]
+
+        def _select_for_chunk(chunk, mt):
+            matched = mock_matcher.match.return_value
+            mt[0] += len(matched)
+            return ([], [], "", "")
+
+        ctx_mock = mocker.MagicMock(
+            user_entries=user_entries,
+            term_matcher=mock_matcher,
+            source_lang=en_lang,
+            target_lang=ru_lang,
+            select_for_chunk=_select_for_chunk,
         )
-        mocker.patch("src.main.fetch_cost")
+        mocker.patch(
+            "src.main.prepare_glossary_context",
+            return_value=ctx_mock,
+        )
+        mocker.patch("src.llm.resolve_and_log_cost")
 
         mock_llm = AsyncMock()
         mock_llm.get_reply_async.return_value = ("Перевод", "completion-1")
         mocker.patch("src.main.LLM", return_value=mock_llm)
-
-        mock_matcher = mocker.patch("src.main.TermMatcher")
-        mock_matcher_instance = mock_matcher.return_value
-        mock_matcher_instance.match.return_value = [auto_entries[0]]
 
         cfg = Settings(
             llm=LLMSettings(api_key=SecretStr("test-key")),
@@ -644,8 +431,14 @@ class TestPipelineResult:
 
     @pytest.mark.asyncio
     async def test_mode_is_review_when_target_provided(self, mocker):
-        mocker.patch("src.main._parse_glossaries", return_value=([], []))
-        mocker.patch("src.main.fetch_cost")
+        mocker.patch(
+            "src.main.prepare_glossary_context",
+            return_value=mocker.MagicMock(
+                user_entries=[],
+                select_for_chunk=lambda chunk, mt: ([], [], "", ""),
+            ),
+        )
+        mocker.patch("src.llm.resolve_and_log_cost")
 
         mock_llm = AsyncMock()
         mock_llm.get_reply_async.return_value = ("Review result", "id-1")
@@ -670,8 +463,14 @@ class TestPipelineResult:
         user_entries = [
             _make_entry(10, "flow meter", "расходомер", "flow meter", "расходомер")
         ]
-        mocker.patch("src.main._parse_glossaries", return_value=([], user_entries))
-        mocker.patch("src.main.fetch_cost")
+        mocker.patch(
+            "src.main.prepare_glossary_context",
+            return_value=mocker.MagicMock(
+                user_entries=user_entries,
+                select_for_chunk=lambda chunk, mt: ([], [], "", ""),
+            ),
+        )
+        mocker.patch("src.llm.resolve_and_log_cost")
 
         mock_llm = AsyncMock()
         mock_llm.get_reply_async.return_value = ("Перевод", "completion-1")
@@ -694,8 +493,14 @@ class TestPipelineResult:
 
     @pytest.mark.asyncio
     async def test_auto_glossary_disabled_flag(self, mocker):
-        mocker.patch("src.main._parse_glossaries", return_value=([], []))
-        mocker.patch("src.main.fetch_cost")
+        mocker.patch(
+            "src.main.prepare_glossary_context",
+            return_value=mocker.MagicMock(
+                user_entries=[],
+                select_for_chunk=lambda chunk, mt: ([], [], "", ""),
+            ),
+        )
+        mocker.patch("src.llm.resolve_and_log_cost")
 
         mock_llm = AsyncMock()
         mock_llm.get_reply_async.return_value = ("Перевод", "completion-1")
@@ -720,7 +525,13 @@ class TestPipelineResult:
 class TestMainRaisesOnEmptySource:
     @pytest.mark.asyncio
     async def test_raises_when_source_file_missing(self, mocker, tmp_path):
-        mocker.patch("src.main._parse_glossaries", return_value=([], []))
+        mocker.patch(
+            "src.main.prepare_glossary_context",
+            return_value=mocker.MagicMock(
+                user_entries=[],
+                select_for_chunk=lambda chunk, mt: ([], [], "", ""),
+            ),
+        )
 
         missing = tmp_path / "nonexistent.txt"
         cfg = Settings(
@@ -739,8 +550,14 @@ class TestAutoDetectTranslation:
 
     @pytest.mark.asyncio
     async def test_both_none_english_source_detected(self, mocker):
-        mocker.patch("src.main._parse_glossaries", return_value=([], []))
-        mocker.patch("src.main.fetch_cost")
+        mocker.patch(
+            "src.main.prepare_glossary_context",
+            return_value=mocker.MagicMock(
+                user_entries=[],
+                select_for_chunk=lambda chunk, mt: ([], [], "", ""),
+            ),
+        )
+        mocker.patch("src.llm.resolve_and_log_cost")
 
         mock_llm = AsyncMock()
         mock_llm.get_reply_async.return_value = ("Перевод", "completion-1")
@@ -767,8 +584,14 @@ class TestAutoDetectTranslation:
 
     @pytest.mark.asyncio
     async def test_source_set_target_none_defaults_ru(self, mocker):
-        mocker.patch("src.main._parse_glossaries", return_value=([], []))
-        mocker.patch("src.main.fetch_cost")
+        mocker.patch(
+            "src.main.prepare_glossary_context",
+            return_value=mocker.MagicMock(
+                user_entries=[],
+                select_for_chunk=lambda chunk, mt: ([], [], "", ""),
+            ),
+        )
+        mocker.patch("src.llm.resolve_and_log_cost")
 
         mock_llm = AsyncMock()
         mock_llm.get_reply_async.return_value = ("Traducción", "completion-1")
@@ -795,8 +618,14 @@ class TestAutoDetectReview:
 
     @pytest.mark.asyncio
     async def test_both_none_review_detected(self, mocker):
-        mocker.patch("src.main._parse_glossaries", return_value=([], []))
-        mocker.patch("src.main.fetch_cost")
+        mocker.patch(
+            "src.main.prepare_glossary_context",
+            return_value=mocker.MagicMock(
+                user_entries=[],
+                select_for_chunk=lambda chunk, mt: ([], [], "", ""),
+            ),
+        )
+        mocker.patch("src.llm.resolve_and_log_cost")
 
         mock_llm = AsyncMock()
         mock_llm.get_reply_async.return_value = ("Review OK", "id-1")

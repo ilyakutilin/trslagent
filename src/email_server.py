@@ -20,7 +20,8 @@ from src.email_processor import (
     fetch_email_content,
     send_reply,
 )
-from src.main import export_glossary_matches, main, PipelineResult
+from src.main import export_glossary_matches, main
+from src.pipeline.result import PipelineResult
 
 SIGNATURE_TOLERANCE = 300  # 5 minutes
 
