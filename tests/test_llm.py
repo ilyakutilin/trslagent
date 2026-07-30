@@ -1,12 +1,13 @@
 import httpx
 import pytest
 import respx
+from iso639 import Lang
 from openai import APIConnectionError, APITimeoutError, RateLimitError
 from openai.types.chat.chat_completion import ChatCompletion, Choice
 from openai.types.chat.chat_completion_message import ChatCompletionMessage
 
-from src.config import CostSettings
-from src.llm import LLM, _find_key, fetch_cost
+from src.config import CostSettings, InputData, Settings
+from src.llm import LLM, _find_key, fetch_cost, resolve_and_log_cost
 
 
 class TestFindKey:
@@ -327,3 +328,196 @@ class TestLLM:
             ValueError, match="Set the OPENROUTER_API_KEY environment variable"
         ):
             await llm.get_reply_async("system", "user")
+
+
+class TestResolveAndLogCost:
+    @pytest.fixture(autouse=True)
+    def _reset_toml_path(self):
+        Settings._toml_path = None
+        yield
+        Settings._toml_path = None
+
+    @pytest.mark.asyncio
+    async def test_known_costs(self, mocker):
+        mock_fetch = mocker.patch("src.llm.fetch_cost", side_effect=[1.50, 2.50])
+
+        cfg = Settings(
+            input_data=InputData(
+                source_lang=Lang("en"),
+                target_lang=Lang("ru"),
+                source_text="x",
+            ),
+            cost=CostSettings(generation_info_url="https://api.example.com/cost"),
+        )
+
+        await resolve_and_log_cost(["id-1", "id-2"], "test-key", cfg)
+        assert mock_fetch.call_count == 2
+        mock_fetch.assert_any_call("id-1", "test-key", cfg.cost)
+        mock_fetch.assert_any_call("id-2", "test-key", cfg.cost)
+
+    @pytest.mark.asyncio
+    async def test_unknown_costs(self, mocker):
+        mock_fetch = mocker.patch("src.llm.fetch_cost", side_effect=[1.50, None])
+
+        cfg = Settings(
+            input_data=InputData(
+                source_lang=Lang("en"),
+                target_lang=Lang("ru"),
+                source_text="x",
+            ),
+            cost=CostSettings(generation_info_url="https://api.example.com/cost"),
+        )
+
+        await resolve_and_log_cost(["id-1", "id-2"], "test-key", cfg)
+        assert mock_fetch.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_no_url_configured(self, mocker):
+        mock_fetch = mocker.patch("src.llm.fetch_cost")
+
+        cfg = Settings(
+            input_data=InputData(
+                source_lang=Lang("en"),
+                target_lang=Lang("ru"),
+                source_text="x",
+            ),
+            cost=CostSettings(generation_info_url=None),
+        )
+
+        await resolve_and_log_cost(["id-1"], "test-key", cfg)
+        mock_fetch.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_empty_completion_ids(self, mocker):
+        mock_fetch = mocker.patch("src.llm.fetch_cost")
+
+        cfg = Settings(
+            input_data=InputData(
+                source_lang=Lang("en"),
+                target_lang=Lang("ru"),
+                source_text="x",
+            ),
+            cost=CostSettings(generation_info_url="https://api.example.com/cost"),
+        )
+
+        await resolve_and_log_cost([], "test-key", cfg)
+        mock_fetch.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_returns_tuple_with_known_costs(self, mocker):
+        mocker.patch("src.llm.fetch_cost", side_effect=[1.50, 2.50])
+
+        cfg = Settings(
+            input_data=InputData(
+                source_lang=Lang("en"),
+                target_lang=Lang("ru"),
+                source_text="x",
+            ),
+            cost=CostSettings(generation_info_url="https://api.example.com/cost"),
+        )
+
+        total, currency, unknowns = await resolve_and_log_cost(
+            ["id-1", "id-2"], "test-key", cfg
+        )
+        assert total == 4.0
+        assert currency == "USD"
+        assert unknowns == 0
+
+    @pytest.mark.asyncio
+    async def test_returns_none_total_with_all_unknown(self, mocker):
+        mocker.patch("src.llm.fetch_cost", side_effect=[None, None])
+
+        cfg = Settings(
+            input_data=InputData(
+                source_lang=Lang("en"),
+                target_lang=Lang("ru"),
+                source_text="x",
+            ),
+            cost=CostSettings(generation_info_url="https://api.example.com/cost"),
+        )
+
+        total, currency, unknowns = await resolve_and_log_cost(
+            ["id-1", "id-2"], "test-key", cfg
+        )
+        assert total is None
+        assert currency == "USD"
+        assert unknowns == 2
+
+    @pytest.mark.asyncio
+    async def test_returns_total_only_for_known(self, mocker):
+        mocker.patch("src.llm.fetch_cost", side_effect=[1.50, None])
+
+        cfg = Settings(
+            input_data=InputData(
+                source_lang=Lang("en"),
+                target_lang=Lang("ru"),
+                source_text="x",
+            ),
+            cost=CostSettings(generation_info_url="https://api.example.com/cost"),
+        )
+
+        total, _, unknowns = await resolve_and_log_cost(
+            ["id-1", "id-2"], "test-key", cfg
+        )
+        assert total == 1.50
+        assert unknowns == 1
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_no_url(self, mocker):
+        mock_fetch = mocker.patch("src.llm.fetch_cost")
+
+        cfg = Settings(
+            input_data=InputData(
+                source_lang=Lang("en"),
+                target_lang=Lang("ru"),
+                source_text="x",
+            ),
+            cost=CostSettings(generation_info_url=None),
+        )
+
+        total, currency, unknowns = await resolve_and_log_cost(
+            ["id-1"], "test-key", cfg
+        )
+        mock_fetch.assert_not_called()
+        assert total is None
+        assert currency == "USD"
+        assert unknowns == 0
+
+    @pytest.mark.asyncio
+    async def test_returns_none_when_empty_ids(self, mocker):
+        mock_fetch = mocker.patch("src.llm.fetch_cost")
+
+        cfg = Settings(
+            input_data=InputData(
+                source_lang=Lang("en"),
+                target_lang=Lang("ru"),
+                source_text="x",
+            ),
+            cost=CostSettings(generation_info_url="https://api.example.com/cost"),
+        )
+
+        total, _, _ = await resolve_and_log_cost([], "test-key", cfg)
+        mock_fetch.assert_not_called()
+        assert total is None
+
+    @pytest.mark.asyncio
+    async def test_fetch_cost_raises_logs_warning_and_counts_unknown(self, mocker):
+        mocker.patch(
+            "src.llm.fetch_cost",
+            side_effect=[httpx.HTTPError("boom"), 1.25],
+        )
+
+        cfg = Settings(
+            input_data=InputData(
+                source_lang=Lang("en"),
+                target_lang=Lang("ru"),
+                source_text="x",
+            ),
+            cost=CostSettings(generation_info_url="https://api.example.com/cost"),
+        )
+
+        total, _, unknowns = await resolve_and_log_cost(
+            ["id-1", "id-2"], "test-key", cfg
+        )
+        assert total == 1.25
+        assert unknowns == 1

@@ -7,7 +7,7 @@ import sys
 from pathlib import Path
 
 from src.config import get_settings
-from src.main import main, export_glossary_matches
+from src.main import export_glossary_matches, main
 
 
 USAGE = (
