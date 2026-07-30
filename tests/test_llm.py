@@ -73,7 +73,8 @@ class TestFetchCost:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_http_error(self, cost_settings: CostSettings):
+    async def test_http_error(self, cost_settings: CostSettings, mocker):
+        mocker.patch("asyncio.sleep")
         url = f"{cost_settings.generation_info_url}?id=test-123"
         with respx.mock() as mock:
             mock.get(url).respond(status_code=500)
@@ -98,7 +99,8 @@ class TestFetchCost:
         assert "Authorization" not in route.calls.last.request.headers
 
     @pytest.mark.asyncio
-    async def test_connection_error(self, cost_settings: CostSettings):
+    async def test_connection_error(self, cost_settings: CostSettings, mocker):
+        mocker.patch("asyncio.sleep")
         url = f"{cost_settings.generation_info_url}?id=test-123"
         with respx.mock() as mock:
             mock.get(url).mock(side_effect=httpx.ConnectError("Connection refused"))
@@ -110,6 +112,38 @@ class TestFetchCost:
         settings = CostSettings(generation_info_url=None, cost_key="total_cost")
         result = await fetch_cost("test-123", "fake-key", settings)
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_retry_succeeds_on_second_attempt(
+        self, cost_settings: CostSettings, mocker
+    ):
+        mocker.patch("asyncio.sleep")
+        url = f"{cost_settings.generation_info_url}?id=test-123"
+        with respx.mock() as mock:
+            route = mock.get(url)
+            route.side_effect = [
+                httpx.Response(500),
+                httpx.Response(200, json={"total_cost": 0.01}),
+            ]
+            result = await fetch_cost("test-123", "fake-key", cost_settings)
+        assert result == 0.01
+
+    @pytest.mark.asyncio
+    async def test_retry_exhausted_logs_error_type(
+        self, cost_settings: CostSettings, mocker
+    ):
+        mocker.patch("asyncio.sleep")
+        url = f"{cost_settings.generation_info_url}?id=test-123"
+        with respx.mock() as mock:
+            mock.get(url).mock(side_effect=httpx.ConnectError("Connection refused"))
+            mock_logger = mocker.patch("src.llm.logger")
+            result = await fetch_cost("test-123", "fake-key", cost_settings)
+        assert result is None
+        mock_logger.warning.assert_called()
+        warning_msg = mock_logger.warning.call_args[0][0]
+        assert "ConnectError" in warning_msg
+        assert "Connection refused" in warning_msg
+        assert "after 3 retries" in warning_msg
 
 
 def _make_completion(

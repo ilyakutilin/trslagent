@@ -219,20 +219,30 @@ async def fetch_cost(
     if not cost_settings.generation_info_url:
         return None
     url = f"{cost_settings.generation_info_url}?id={completion_id}"
-    headers: dict[str, str] = {}
+    headers: dict[str, str] = {"User-Agent": "curl/8.0", "Accept": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            response = await client.get(url, headers=headers)
-            response.raise_for_status()
-            data = response.json()
-    # TODO: If not found, sleep 3 seconds and retry 3 times. Only then fail.
-    # TODO: Show the error type and text in the logs.
-    except Exception:
+    max_retries = 5
+    last_error: Exception | None = None
+    for attempt in range(max_retries):
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.get(url, headers=headers)
+                response.raise_for_status()
+                data = response.json()
+            break
+        except Exception as e:
+            last_error = e
+            if attempt < max_retries - 1:
+                logger.warning(
+                    f"Cost fetch attempt {attempt + 1}/{max_retries} failed for "
+                    f"completion {completion_id}: {type(e).__name__}: {e}"
+                )
+                await asyncio.sleep(3)
+    else:
         logger.warning(
-            f"Failed to fetch cost for completion {completion_id}: {url}",
-            exc_info=True,
+            f"Failed to fetch cost for completion {completion_id} after "
+            f"{max_retries} retries: {type(last_error).__name__}: {last_error}"
         )
         return None
 
