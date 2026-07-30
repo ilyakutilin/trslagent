@@ -143,7 +143,7 @@ class TestFetchCost:
         warning_msg = mock_logger.warning.call_args[0][0]
         assert "ConnectError" in warning_msg
         assert "Connection refused" in warning_msg
-        assert "after 3 retries" in warning_msg
+        assert "after 5 retries" in warning_msg
 
 
 def _make_completion(
