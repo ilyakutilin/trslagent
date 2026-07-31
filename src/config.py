@@ -123,6 +123,39 @@ class LogSettings(BaseModel):
     )
 
 
+class ProxySettings(BaseModel):
+    """Proxy settings for all HTTP clients.
+
+    When ``enabled`` is False, all requests go direct and proxy environment
+    variables are ignored. When ``protocol`` is set, it takes precedence
+    over proxy environment variables. When neither is the case, proxy
+    environment variables (ALL_PROXY, HTTPS_PROXY, HTTP_PROXY) are honored.
+    """
+
+    enabled: bool = Field(
+        default=True,
+        description=(
+            "When False, all requests go direct and proxy environment "
+            "variables are ignored"
+        ),
+    )
+    protocol: str | None = Field(
+        default=None,
+        description=(
+            "Proxy protocol: http, https, socks5, socks5h, socks4, socks4a. "
+            "None/empty signals no explicit proxy configuration"
+        ),
+    )
+    host: str = Field(default="127.0.0.1", description="Proxy host")
+    port: int = Field(default=1080, ge=1, le=65535, description="Proxy port")
+    username: str | None = Field(
+        default=None, description="Optional proxy username for authentication"
+    )
+    password: SecretStr | None = Field(
+        default=None, description="Optional proxy password for authentication"
+    )
+
+
 class EmailSettings(BaseModel):
     """Email/webhook settings for receiving translation requests via Resend"""
 
@@ -475,6 +508,7 @@ class Settings(BaseSettings):
 
     llm: LLMSettings = Field(default_factory=LLMSettings)
     cost: CostSettings = Field(default_factory=CostSettings)
+    proxy: ProxySettings = Field(default_factory=ProxySettings)
     chunk: ChunkSettings = Field(default_factory=ChunkSettings)
     glossary: GlossarySettings = Field(default_factory=GlossarySettings)
     log: LogSettings = Field(default_factory=LogSettings)

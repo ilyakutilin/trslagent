@@ -42,3 +42,11 @@ source_file_path = "files/source.txt"
 # generation_info_url = "https://openrouter.ai/api/v1/generation"  # URL for cost lookup; set to enable cost display
 # cost_key = "total_cost"  # key in the generation info JSON response
 # cost_currency = "USD"    # currency for cost display
+
+[proxy]
+# enabled = true              # master switch; false = direct connections, env proxy vars ignored
+# protocol = "http"           # http, https, socks5, socks5h, socks4, socks4a; empty = use env vars (ALL_PROXY etc.)
+# host = "127.0.0.1"
+# port = 1080
+# username = ""
+# NOTE: proxy password is a secret — set it via PROXY__PASSWORD in .env only, never in TOML

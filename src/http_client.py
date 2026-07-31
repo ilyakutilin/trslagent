@@ -3,22 +3,118 @@
 This module is the single place in the project for creating
 httpx.AsyncClient instances (``create_client``) and for executing HTTP
 requests with retries and exponential backoff (``fetch_with_retry``).
-Proxy environment variables (ALL_PROXY, HTTPS_PROXY, HTTP_PROXY) are
-honored because httpx defaults ``trust_env`` to True.
+Proxy behavior is resolved by ``resolve_proxy_kwargs`` from the
+``[proxy]`` settings: explicit proxy configuration takes precedence over
+proxy environment variables (ALL_PROXY, HTTPS_PROXY, HTTP_PROXY), a
+disabled proxy forces direct connections, and otherwise the environment
+variables are honored (httpx ``trust_env=True``).
 """
 
 import asyncio
+import os
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
-from src.config import logger
+from src.config import ProxySettings, logger
 
 DEFAULT_TIMEOUT: float = 30.0
 LLM_TIMEOUT: float = 600.0
 DEFAULT_LIMITS: httpx.Limits = httpx.Limits(
     max_connections=50, max_keepalive_connections=20
 )
+
+SUPPORTED_PROXY_PROTOCOLS: tuple[str, ...] = (
+    "http",
+    "https",
+    "socks5",
+    "socks5h",
+    "socks4",
+    "socks4a",
+)
+PROXY_ENV_VARS: tuple[str, ...] = (
+    "ALL_PROXY",
+    "all_proxy",
+    "HTTPS_PROXY",
+    "https_proxy",
+    "HTTP_PROXY",
+    "http_proxy",
+)
+
+
+class ProxyConfigError(ValueError):
+    """Raised when proxy settings cannot be resolved into client kwargs."""
+
+
+def resolve_proxy_kwargs(proxy_settings: ProxySettings | None) -> dict[str, Any]:
+    """Resolve proxy settings into httpx.AsyncClient constructor kwargs.
+
+    Applies the following resolution rules:
+
+    1. ``proxy_settings is None`` (caller didn't provide) — legacy
+       behavior: no kwargs are returned, so httpx defaults to
+       ``trust_env=True`` (proxy env vars honored).
+    2. ``enabled`` is False — ``{"trust_env": False}`` (direct
+       connections, env vars ignored).
+    3. ``protocol`` is set (non-empty after strip) — validated against
+       ``SUPPORTED_PROXY_PROTOCOLS``, then a proxy URL is built as
+       ``{protocol}://[{quote(user)}[:{quote(password)}]@]{host}:{port}``
+       and ``{"proxy": url, "trust_env": False}`` is returned (explicit
+       config takes precedence over env vars).
+    4. ``protocol`` unset — any of ``PROXY_ENV_VARS`` set and non-empty
+       after strip yields ``{"trust_env": True}``; otherwise
+       ``ProxyConfigError`` is raised.
+
+    Args:
+        proxy_settings: Optional proxy settings; None triggers the legacy
+            behavior of rule 1.
+
+    Returns:
+        A dict of keyword arguments to merge into the client constructor
+        call.
+
+    Raises:
+        ProxyConfigError: If the protocol is unsupported or no proxy
+            configuration can be established (rule 4).
+    """
+    if proxy_settings is None:
+        return {}
+    if not proxy_settings.enabled:
+        logger.debug("Proxy disabled — requests go direct")
+        return {"trust_env": False}
+    protocol = proxy_settings.protocol.strip() if proxy_settings.protocol else ""
+    if protocol:
+        if protocol not in SUPPORTED_PROXY_PROTOCOLS:
+            raise ProxyConfigError(
+                f"Unsupported proxy protocol '{protocol}'. "
+                f"Supported protocols: {', '.join(SUPPORTED_PROXY_PROTOCOLS)}"
+            )
+        userinfo = ""
+        if proxy_settings.username:
+            userinfo = quote(proxy_settings.username)
+            if proxy_settings.password is not None:
+                userinfo += f":{quote(proxy_settings.password.get_secret_value())}"
+        userinfo = f"{userinfo}@" if userinfo else ""
+        proxy_url = (
+            f"{protocol}://{userinfo}{proxy_settings.host}:{proxy_settings.port}"
+        )
+        logger.info(
+            "Proxy: using configured {} proxy at {}:{}",
+            protocol,
+            proxy_settings.host,
+            proxy_settings.port,
+        )
+        return {"proxy": proxy_url, "trust_env": False}
+    if any(os.getenv(var, "").strip() for var in PROXY_ENV_VARS):
+        logger.info("Proxy: using proxy settings from environment variables")
+        return {"trust_env": True}
+    raise ProxyConfigError(
+        "No proxy configured: set [proxy] settings "
+        "(PROXY__PROTOCOL/PROXY__HOST/PROXY__PORT), or export "
+        "ALL_PROXY/HTTPS_PROXY/HTTP_PROXY env vars, or set "
+        "PROXY__ENABLED=false for direct connections."
+    )
 
 
 def create_client(
@@ -27,6 +123,7 @@ def create_client(
     limits: httpx.Limits = DEFAULT_LIMITS,
     base_url: str | None = None,
     headers: dict[str, str] | None = None,
+    proxy_settings: ProxySettings | None = None,
 ) -> httpx.AsyncClient:
     """Create a configured httpx.AsyncClient.
 
@@ -35,21 +132,29 @@ def create_client(
         limits: Connection pool limits.
         base_url: Optional base URL; request paths are resolved against it.
         headers: Optional default headers sent with every request.
+        proxy_settings: Optional proxy settings resolved via
+            :func:`resolve_proxy_kwargs`; when None, the legacy behavior
+            is kept (httpx default ``trust_env=True``).
 
     Returns:
         A ready-to-use httpx.AsyncClient.
 
     Note:
-        ``trust_env`` is left at httpx's default of True, so the client
-        honors the ALL_PROXY, HTTPS_PROXY, and HTTP_PROXY environment
-        variables. SOCKS proxies require the optional ``socksio``
-        package; without it, constructing the client raises ImportError.
+        Proxy behavior follows :func:`resolve_proxy_kwargs`: explicit
+        ``[proxy]`` configuration takes precedence and forces
+        ``trust_env=False``, a disabled proxy forces direct connections
+        (env vars ignored), and otherwise the ALL_PROXY, HTTPS_PROXY, and
+        HTTP_PROXY environment variables are honored (httpx
+        ``trust_env=True``). SOCKS proxies require the optional
+        ``socksio`` package; without it, constructing the client raises
+        ImportError.
     """
     client_kwargs: dict[str, Any] = {
         "headers": headers,
         "timeout": timeout,
         "limits": limits,
     }
+    client_kwargs.update(resolve_proxy_kwargs(proxy_settings))
     if base_url is not None:
         client_kwargs["base_url"] = base_url
     return httpx.AsyncClient(**client_kwargs)

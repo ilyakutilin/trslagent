@@ -419,6 +419,12 @@ class TestProcessInbound:
                 new_callable=AsyncMock,
                 return_value=pr,
             )
+        else:
+            mocks["main"] = mocker.patch(
+                "src.email_server.main",
+                new_callable=AsyncMock,
+                return_value=None,
+            )
         mock_reply_kwargs = {"new_callable": AsyncMock}
         if send_reply_side_effect:
             mock_reply_kwargs["side_effect"] = send_reply_side_effect
@@ -608,7 +614,7 @@ class TestProcessInbound:
     async def test_continues_after_download_exception_for_one_attachment(self, mocker):
         call_count = 0
 
-        async def dl_side_effect(url, client=None):
+        async def dl_side_effect(url, client=None, proxy_settings=None):
             nonlocal call_count
             call_count += 1
             if "bad" in url:
@@ -673,6 +679,9 @@ class TestServe:
         event_instance = event_mock.return_value
         event_instance.wait = AsyncMock(side_effect=KeyboardInterrupt)
 
+        mock_client = AsyncMock()
+        mocker.patch("src.email_server.create_client", return_value=mock_client)
+
         cfg = _make_cfg({"listen_host": "127.0.0.1", "listen_port": 9999})
         with pytest.raises(KeyboardInterrupt):
             await serve(cfg)
@@ -707,7 +716,7 @@ class TestServe:
         with pytest.raises(KeyboardInterrupt):
             await serve(cfg)
 
-        mock_create.assert_called_once_with()
+        mock_create.assert_called_once_with(proxy_settings=cfg.proxy)
         mock_client.aclose.assert_awaited_once()
         runner_instance.cleanup.assert_called_once()
 
@@ -731,7 +740,7 @@ class TestServe:
         with pytest.raises(OSError, match="address in use"):
             await serve(cfg)
 
-        mock_create.assert_called_once_with()
+        mock_create.assert_called_once_with(proxy_settings=cfg.proxy)
         runner_instance.cleanup.assert_called_once()
         mock_client.aclose.assert_awaited_once()
 

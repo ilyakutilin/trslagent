@@ -21,6 +21,8 @@ async def main(cfg: Settings) -> PipelineResult | None:
     A single short-lived HTTP client is created for the run's cost fetches
     and closed when the pipeline finishes. The LLM client is closed in a
     finally block, so resources are released even when the pipeline fails.
+    Proxy settings from ``cfg.proxy`` are threaded to both the HTTP client
+    and the LLM.
 
     Args:
         cfg: Application settings controlling all pipeline behavior.
@@ -53,9 +55,10 @@ async def main(cfg: Settings) -> PipelineResult | None:
             model=cfg.llm.model,
             temperature=cfg.llm.temperature,
             reasoning_effort=cfg.llm.reasoning_effort,
+            proxy_settings=cfg.proxy,
         )
 
-    async with create_client() as http_client:
+    async with create_client(proxy_settings=cfg.proxy) as http_client:
         try:
             if cfg.input_data.target_text:
                 return await run_review_pipeline(ctx, cfg, llm, http_client)

@@ -7,8 +7,8 @@ import pytest
 import respx
 from iso639 import Lang
 
-from src.config import CostSettings, InputData, Settings
-from src.http_client import create_client
+from src.config import CostSettings, InputData, ProxySettings, Settings
+from src.http_client import LLM_TIMEOUT, create_client
 from src.llm import LLM, _find_key, fetch_cost, resolve_and_log_cost
 
 
@@ -166,6 +166,24 @@ class TestFetchCost:
             await client.aclose()
         mock_create.assert_not_called()
 
+    @pytest.mark.asyncio
+    async def test_proxy_settings_forwarded_to_owned_client(
+        self, cost_settings: CostSettings, mocker
+    ):
+        proxy = ProxySettings(enabled=False)
+        mock_client = AsyncMock()
+        mock_client.request.return_value = httpx.Response(
+            200,
+            json={"total_cost": 0.01},
+            request=httpx.Request("GET", "https://api.example.com/generation"),
+        )
+        mock_create = mocker.patch("src.llm.create_client", return_value=mock_client)
+        result = await fetch_cost(
+            "test-123", "fake-key", cost_settings, proxy_settings=proxy
+        )
+        assert result == 0.01
+        mock_create.assert_called_once_with(timeout=30, proxy_settings=proxy)
+
 
 def _make_completion_response(
     content: str | None, completion_id: str = "test-id"
@@ -224,6 +242,35 @@ class TestLLM:
             await llm.get_reply_async("system", "user")
         payload = json.loads(route.calls.last.request.content)
         assert payload["reasoning_effort"] == "high"
+
+    def test_get_http_client_forwards_proxy_settings(self, mocker):
+        proxy = ProxySettings(enabled=False)
+        mock_create = mocker.patch("src.llm.create_client")
+        llm = LLM(
+            base_url="https://test.api",
+            api_key="test-key",
+            model="test-model",
+            temperature=0.3,
+            proxy_settings=proxy,
+        )
+        llm._get_http_client()
+        mock_create.assert_called_once_with(
+            base_url="https://test.api",
+            headers={"Authorization": "Bearer test-key"},
+            timeout=LLM_TIMEOUT,
+            proxy_settings=proxy,
+        )
+
+    def test_get_http_client_proxy_settings_none_by_default(self, mocker):
+        mock_create = mocker.patch("src.llm.create_client")
+        llm = LLM(
+            base_url="https://test.api",
+            api_key="test-key",
+            model="test-model",
+            temperature=0.3,
+        )
+        llm._get_http_client()
+        assert mock_create.call_args.kwargs["proxy_settings"] is None
 
     @pytest.mark.asyncio
     async def test_get_reply_timeout_retry(self, llm: LLM, mocker):
@@ -454,8 +501,12 @@ class TestResolveAndLogCost:
 
         await resolve_and_log_cost(["id-1", "id-2"], "test-key", cfg)
         assert mock_fetch.call_count == 2
-        mock_fetch.assert_any_call("id-1", "test-key", cfg.cost, client=None)
-        mock_fetch.assert_any_call("id-2", "test-key", cfg.cost, client=None)
+        mock_fetch.assert_any_call(
+            "id-1", "test-key", cfg.cost, client=None, proxy_settings=cfg.proxy
+        )
+        mock_fetch.assert_any_call(
+            "id-2", "test-key", cfg.cost, client=None, proxy_settings=cfg.proxy
+        )
 
     @pytest.mark.asyncio
     async def test_forwards_injected_client_to_fetch_cost(self, mocker):
@@ -473,8 +524,12 @@ class TestResolveAndLogCost:
 
         await resolve_and_log_cost(["id-1", "id-2"], "test-key", cfg, client=injected)
         assert mock_fetch.call_count == 2
-        mock_fetch.assert_any_call("id-1", "test-key", cfg.cost, client=injected)
-        mock_fetch.assert_any_call("id-2", "test-key", cfg.cost, client=injected)
+        mock_fetch.assert_any_call(
+            "id-1", "test-key", cfg.cost, client=injected, proxy_settings=cfg.proxy
+        )
+        mock_fetch.assert_any_call(
+            "id-2", "test-key", cfg.cost, client=injected, proxy_settings=cfg.proxy
+        )
 
     @pytest.mark.asyncio
     async def test_passes_client_none_when_not_injected(self, mocker):
@@ -490,7 +545,9 @@ class TestResolveAndLogCost:
         )
 
         await resolve_and_log_cost(["id-1"], "test-key", cfg)
-        mock_fetch.assert_called_once_with("id-1", "test-key", cfg.cost, client=None)
+        mock_fetch.assert_called_once_with(
+            "id-1", "test-key", cfg.cost, client=None, proxy_settings=cfg.proxy
+        )
 
     @pytest.mark.asyncio
     async def test_unknown_costs(self, mocker):

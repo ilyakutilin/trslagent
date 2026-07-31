@@ -22,6 +22,18 @@ def _reset_toml_path():
     Settings._toml_path = None
 
 
+@pytest.fixture(autouse=True)
+def _no_proxy(monkeypatch):
+    from src.config import ProxySettings
+    from src.http_client import create_client as _real_create_client
+
+    def _wrapped(*args, **kwargs):
+        kwargs["proxy_settings"] = ProxySettings(enabled=False)
+        return _real_create_client(*args, **kwargs)
+
+    monkeypatch.setattr("src.main.create_client", _wrapped)
+
+
 def _make_term(lang_str: str, value: str, lemmatized: str | None = None) -> Term:
     return Term(language=Lang(lang_str), value=value, lemmatized=lemmatized)
 
@@ -342,7 +354,7 @@ class TestPipelineLifecycle:
         result = await main(cfg)
 
         assert result is not None
-        mock_create_client.assert_called_once_with()
+        mock_create_client.assert_called_once_with(proxy_settings=cfg.proxy)
         mock_client.__aenter__.assert_awaited_once()
         mock_client.__aexit__.assert_awaited_once()
         mock_pipeline.assert_awaited_once()

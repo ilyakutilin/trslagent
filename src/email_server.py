@@ -13,7 +13,7 @@ import httpx
 
 from aiohttp import web
 
-from src.config import Settings, logger
+from src.config import ProxySettings, Settings, logger
 from src.email_processor import (
     build_settings_from_email,
     check_sender,
@@ -229,6 +229,7 @@ async def _handle_webhook(
             message_id=message_id,
             cfg=cfg,
             client=http_client,
+            proxy_settings=cfg.proxy,
         )
     )
 
@@ -243,6 +244,7 @@ async def _process_inbound(
     message_id: str,
     cfg: Settings,
     client: httpx.AsyncClient | None = None,
+    proxy_settings: ProxySettings | None = None,
 ) -> None:
     """Fetch and process an inbound email for translation, review, or glossary matching.
 
@@ -259,6 +261,9 @@ async def _process_inbound(
         client: Optional shared HTTP client reused for all Resend API
             calls. When None, each email_processor call creates and
             closes its own short-lived client.
+        proxy_settings: Optional proxy settings forwarded to owned
+            short-lived clients created by the email_processor functions;
+            an injected shared *client* is unaffected.
     """
     email_settings = cfg.email
     api_key = email_settings.resend_api_key.get_secret_value()
@@ -272,8 +277,12 @@ async def _process_inbound(
         return
 
     try:
-        email_content = await fetch_email_content(email_id, api_key, client=client)
-        raw_attachments = await fetch_attachments(email_id, api_key, client=client)
+        email_content = await fetch_email_content(
+            email_id, api_key, client=client, proxy_settings=proxy_settings
+        )
+        raw_attachments = await fetch_attachments(
+            email_id, api_key, client=client, proxy_settings=proxy_settings
+        )
 
         attachment_bodies: dict[str, bytes] = {}
         for att in raw_attachments:
@@ -282,7 +291,9 @@ async def _process_inbound(
             if not fname or not dl_url:
                 continue
             try:
-                content = await download_attachment(dl_url, client=client)
+                content = await download_attachment(
+                    dl_url, client=client, proxy_settings=proxy_settings
+                )
                 attachment_bodies[fname] = content
             except ValueError as e:
                 await send_reply(
@@ -293,6 +304,7 @@ async def _process_inbound(
                     from_address=email_settings.from_address,
                     api_key=api_key,
                     client=client,
+                    proxy_settings=proxy_settings,
                 )
                 return
             except Exception:
@@ -311,6 +323,7 @@ async def _process_inbound(
                 from_address=email_settings.from_address,
                 api_key=api_key,
                 client=client,
+                proxy_settings=proxy_settings,
             )
         except Exception:
             logger.exception("Failed to send error reply to {}", sender)
@@ -332,6 +345,7 @@ async def _process_inbound(
             api_key=api_key,
             detail="Failed to parse the request. Please check your attachments and try again.",
             client=client,
+            proxy_settings=proxy_settings,
         )
         return
 
@@ -348,6 +362,7 @@ async def _process_inbound(
                 api_key=api_key,
                 detail="An error occurred during glossary matching. Please try again.",
                 client=client,
+                proxy_settings=proxy_settings,
             )
             return
 
@@ -360,6 +375,7 @@ async def _process_inbound(
                 api_key=api_key,
                 detail="No glossary entries matched your text. Check the source language and glossary.",
                 client=client,
+                proxy_settings=proxy_settings,
             )
             return
 
@@ -372,6 +388,7 @@ async def _process_inbound(
                 from_address=email_settings.from_address,
                 api_key=api_key,
                 client=client,
+                proxy_settings=proxy_settings,
             )
         except Exception:
             logger.exception("Failed to send match-glossary reply to {}", sender)
@@ -389,6 +406,7 @@ async def _process_inbound(
             api_key=api_key,
             detail="An error occurred during processing. Please try again.",
             client=client,
+            proxy_settings=proxy_settings,
         )
         return
 
@@ -401,6 +419,7 @@ async def _process_inbound(
             api_key=api_key,
             detail="No output was produced. Check your input and try again.",
             client=client,
+            proxy_settings=proxy_settings,
         )
         return
 
@@ -415,6 +434,7 @@ async def _process_inbound(
             from_address=email_settings.from_address,
             api_key=api_key,
             client=client,
+            proxy_settings=proxy_settings,
         )
     except Exception:
         logger.exception("Failed to send result reply to {}", sender)
@@ -429,6 +449,7 @@ async def _send_error_reply(
     api_key: str,
     detail: str,
     client: httpx.AsyncClient | None = None,
+    proxy_settings: ProxySettings | None = None,
 ) -> None:
     """Send an error message as a threaded reply and suppress failures.
 
@@ -443,6 +464,9 @@ async def _send_error_reply(
         client: Optional shared HTTP client reused for the reply request.
             When None, ``send_reply`` creates and closes its own
             short-lived client.
+        proxy_settings: Optional proxy settings forwarded to ``send_reply``
+            for its owned short-lived client; an injected shared *client*
+            is unaffected.
     """
     try:
         await send_reply(
@@ -453,6 +477,7 @@ async def _send_error_reply(
             from_address=email_settings.from_address,
             api_key=api_key,
             client=client,
+            proxy_settings=proxy_settings,
         )
     except Exception:
         logger.exception("Failed to send error reply to {}", sender)
@@ -466,7 +491,8 @@ async def serve(cfg: Settings) -> None:
     shared httpx.AsyncClient is created for the server's lifetime, stored
     on the application (``app["http_client"]``), and reused across the
     whole Resend request chain (content fetch, attachment download,
-    reply sending). The client is closed on shutdown or when startup
+    reply sending). The client is created with the proxy settings from
+    *cfg*. The client is closed on shutdown or when startup
     fails; a failure to clean up the runner or close the client is
     logged but never crashes the server.
 
@@ -474,7 +500,7 @@ async def serve(cfg: Settings) -> None:
         cfg: Server configuration (Settings object).
     """
     email_cfg = cfg.email
-    http_client = create_client()
+    http_client = create_client(proxy_settings=cfg.proxy)
     app = web.Application()
     app["cfg"] = cfg
     app["http_client"] = http_client

@@ -10,7 +10,7 @@ from typing import Any, Literal
 
 import httpx
 
-from src.config import CostSettings, Settings, logger
+from src.config import CostSettings, ProxySettings, Settings, logger
 from src.http_client import (
     LLM_TIMEOUT,
     RetryExhaustedError,
@@ -33,6 +33,9 @@ class LLM:
         temperature: Sampling temperature (may be None for models that don't
             support it).
         reasoning_effort: Optional reasoning effort level for compatible models.
+        proxy_settings: Optional proxy settings applied to the underlying
+            HTTP client; None keeps the legacy environment-variable proxy
+            behavior.
     """
 
     def __init__(
@@ -44,6 +47,8 @@ class LLM:
         reasoning_effort: (
             Literal["none", "minimal", "low", "medium", "high", "xhigh"] | None
         ) = None,
+        *,
+        proxy_settings: ProxySettings | None = None,
     ) -> None:
         """Initialize the LLM client.
 
@@ -53,12 +58,16 @@ class LLM:
             model: Model identifier string.
             temperature: Sampling temperature or None.
             reasoning_effort: Optional reasoning effort level.
+            proxy_settings: Optional proxy settings threaded to the HTTP
+                client factory; None keeps the legacy environment-variable
+                proxy behavior.
         """
         self.base_url = base_url
         self.api_key = api_key
         self.model = model
         self.temperature = temperature
         self.reasoning_effort = reasoning_effort
+        self._proxy_settings = proxy_settings
         self._client: httpx.AsyncClient | None = None
         self._client_lock = asyncio.Lock()
 
@@ -67,7 +76,8 @@ class LLM:
 
         Delegates client construction to
         :func:`src.http_client.create_client`, passing the API key as a
-        Bearer token and the LLM request timeout.
+        Bearer token, the LLM request timeout, and the configured proxy
+        settings (``self._proxy_settings``).
 
         Returns:
             Configured httpx.AsyncClient instance.
@@ -81,6 +91,7 @@ class LLM:
             base_url=self.base_url,
             headers={"Authorization": f"Bearer {self.api_key}"},
             timeout=LLM_TIMEOUT,
+            proxy_settings=self._proxy_settings,
         )
 
     async def close(self) -> None:
@@ -241,6 +252,8 @@ async def fetch_cost(
     api_key: str,
     cost_settings: CostSettings,
     client: httpx.AsyncClient | None = None,
+    *,
+    proxy_settings: ProxySettings | None = None,
 ) -> float | None:
     """Fetch the generation cost for a completion from the API.
 
@@ -256,6 +269,8 @@ async def fetch_cost(
         client: Optional injected httpx.AsyncClient that is NOT closed by
             this function. When None, a short-lived client is created and
             closed before returning.
+        proxy_settings: Optional proxy settings applied to the owned
+            short-lived client; an injected *client* is unaffected.
 
     Returns:
         The cost as a float, or None if the fetch failed, the key was missing,
@@ -269,7 +284,7 @@ async def fetch_cost(
         headers["Authorization"] = f"Bearer {api_key}"
     own_client = client is None
     if own_client:
-        client = create_client(timeout=30)
+        client = create_client(timeout=30, proxy_settings=proxy_settings)
     try:
         response = await fetch_with_retry(
             "GET", url, client=client, headers=headers, timeout=30
@@ -321,7 +336,9 @@ async def resolve_and_log_cost(
     Args:
         completion_ids: List of LLM completion IDs to query cost for.
         api_key: API key for authentication.
-        cfg: Application settings containing cost configuration.
+        cfg: Application settings containing cost configuration; the
+            ``cfg.proxy`` settings are forwarded to each
+            :func:`fetch_cost` call for its owned client.
         client: Optional injected httpx.AsyncClient forwarded to each
             :func:`fetch_cost` call; not closed by this function.
 
@@ -337,7 +354,14 @@ async def resolve_and_log_cost(
         return None, cfg.cost.cost_currency, 0
 
     cost_tasks = [
-        fetch_cost(cid, api_key, cfg.cost, client=client) for cid in completion_ids
+        fetch_cost(
+            cid,
+            api_key,
+            cfg.cost,
+            client=client,
+            proxy_settings=cfg.proxy,
+        )
+        for cid in completion_ids
     ]
     cost_results = await asyncio.gather(*cost_tasks, return_exceptions=True)
 

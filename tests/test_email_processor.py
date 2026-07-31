@@ -1,5 +1,6 @@
 import asyncio
 import json
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -7,7 +8,7 @@ import respx
 from iso639 import Lang
 from pydantic import SecretStr
 
-from src.config import EmailSettings, InputData, Settings
+from src.config import EmailSettings, InputData, ProxySettings, Settings
 from src.email_processor import (
     MAX_INDIVIDUAL_ATTACHMENT,
     RESEND_API_BASE,
@@ -267,6 +268,31 @@ class TestSendReply:
                 from_address="a@b.com",
                 api_key="key",
             )
+
+    @pytest.mark.asyncio
+    async def test_proxy_settings_forwarded_to_owned_client(self, mocker):
+        proxy = ProxySettings(enabled=False)
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_client.post.return_value = httpx.Response(
+            200,
+            json={"id": "msg-1"},
+            request=httpx.Request("POST", f"{RESEND_API_BASE}/emails"),
+        )
+        mock_create = mocker.patch(
+            "src.email_processor.create_client", return_value=mock_client
+        )
+        await send_reply(
+            to="user@x.com",
+            subject="Test",
+            body="Body",
+            message_id="mid",
+            from_address="a@b.com",
+            api_key="key",
+            proxy_settings=proxy,
+        )
+        mock_create.assert_called_once_with(timeout=30, proxy_settings=proxy)
+        mock_client.__aexit__.assert_awaited_once()
 
     @respx.mock
     async def test_html_wraps_body_in_pre_tag(self):

@@ -127,6 +127,12 @@ All sections and their keys:
 |               | `known_abbrs_file_path`        | —                                       | Path to abbreviations list                             |
 | `log`         | `level`                        | `"INFO"`                                | `DEBUG`/`INFO`/`WARNING`/`ERROR`/`CRITICAL`            |
 |               | `format`                       | loguru default                          | Custom log format string                               |
+| `proxy`       | `enabled`                     | `true`                                  | Master switch; `false` = direct, env vars ignored     |
+|               | `protocol`                    | —                                       | Proxy protocol (http/socks5/...); empty = use env vars|
+|               | `host`                        | `"127.0.0.1"`                           | Proxy host                                            |
+|               | `port`                        | `1080`                                  | Proxy port (1–65535)                                  |
+|               | `username`                    | —                                       | Proxy username (optional)                             |
+|               | `password`                    | from `.env`                             | Proxy password (secret — env only, never TOML)        |
 | `email`       | `resend_api_key`               | from `.env`                             | Resend API key for sending/receiving emails            |
 |               | `resend_webhook_secret`        | from `.env`                             | Resend webhook signing secret (`whsec_...`)            |
 |               | `from_address`                 | `"Translation Agent <trsl@resend.dev>"` | From address for reply emails                          |
@@ -161,10 +167,27 @@ EMAIL__ALLOWED_RECIPIENT=trsl@mydomain.com
 EMAIL__LISTEN_HOST=0.0.0.0
 EMAIL__LISTEN_PORT=8025
 EMAIL__MAX_ATTACHMENT_SIZE_MB=10
+PROXY__ENABLED=true
+PROXY__PROTOCOL=             # optional — e.g. socks5h; empty = use proxy env vars
+PROXY__HOST=127.0.0.1
+PROXY__PORT=1080
+PROXY__USERNAME=             # optional
+PROXY__PASSWORD=             # secret — env only, never in TOML
 LOG__LEVEL=INFO
 ```
 
 Note: `LLM__API_KEY` is stored as a `SecretStr` and must be set in `.env` or as an env var — not in TOML.
+
+### Proxy
+
+All outbound HTTP traffic (LLM calls, cost lookup, Resend email API) goes through `src/http_client.py:create_client`, which resolves proxy settings from the `[proxy]` section (`PROXY__*` env vars):
+
+- **Master switch** — `enabled` (default `true`). When `false`, all requests go direct and proxy env vars (`ALL_PROXY`, `HTTPS_PROXY`, `HTTP_PROXY`) are ignored.
+- **Explicit config** — set `protocol` (one of `http`, `https`, `socks5`, `socks5h`, `socks4`, `socks4a`) plus `host`/`port`/`username` to build `protocol://[user:pass@]host:port`; this takes precedence over env vars.
+- **Env-var fallback** — with no `protocol` set, the standard proxy env vars (`ALL_PROXY`/`all_proxy`, `HTTPS_PROXY`/`https_proxy`, `HTTP_PROXY`/`http_proxy`) are honored — the previous default behavior.
+- **Fail-fast** — proxy enabled with no `protocol` and none of those env vars set → an error is raised (deliberate). The message points to the `[proxy]`/`PROXY__*` settings, the env vars, or `PROXY__ENABLED=false`.
+- **Password** — `password` is a secret: set it via `PROXY__PASSWORD` in `.env` only, never in TOML.
+- **SOCKS** — `socks5`/`socks5h`/`socks4`/`socks4a` require the `socksio` package (installed via `httpx[socks]`).
 
 ## Usage
 

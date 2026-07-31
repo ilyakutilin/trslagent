@@ -3,12 +3,14 @@ from pathlib import Path
 
 import pytest
 from iso639 import Lang
+from pydantic import ValidationError
 from src.config import (
     ChunkSettings,
     InputData,
     LLMSettings,
     LogSettings,
     OutputData,
+    ProxySettings,
     Settings,
     TomlConfigSource,
     get_settings,
@@ -381,3 +383,78 @@ class TestGetSettings:
         assert settings.chunk.size == 9999
         assert settings.llm.model == "my-model"
         assert settings.log.level == "INFO"
+
+
+class TestProxySettings:
+    def test_defaults(self):
+        s = ProxySettings()
+        assert s.enabled is True
+        assert s.protocol is None
+        assert s.host == "127.0.0.1"
+        assert s.port == 1080
+        assert s.username is None
+        assert s.password is None
+
+    def test_settings_has_proxy_with_defaults(self):
+        s = Settings()
+        assert s.proxy.enabled is True
+        assert s.proxy.protocol is None
+        assert s.proxy.host == "127.0.0.1"
+        assert s.proxy.port == 1080
+
+    def test_env_vars_override_proxy_settings(self, monkeypatch):
+        monkeypatch.setenv("PROXY__PROTOCOL", "socks5h")
+        monkeypatch.setenv("PROXY__HOST", "proxy.example.com")
+        monkeypatch.setenv("PROXY__PORT", "3128")
+        monkeypatch.setenv("PROXY__USERNAME", "alice")
+        monkeypatch.setenv("PROXY__PASSWORD", "secret")
+        s = Settings()
+        assert s.proxy.protocol == "socks5h"
+        assert s.proxy.host == "proxy.example.com"
+        assert s.proxy.port == 3128
+        assert s.proxy.username == "alice"
+        assert s.proxy.password is not None
+        assert s.proxy.password.get_secret_value() == "secret"
+
+    def test_env_var_disables_proxy(self, monkeypatch):
+        monkeypatch.setenv("PROXY__ENABLED", "false")
+        s = Settings()
+        assert s.proxy.enabled is False
+
+    def test_env_var_empty_protocol_ignored(self, monkeypatch):
+        monkeypatch.setenv("PROXY__PROTOCOL", "")
+        s = Settings()
+        assert s.proxy.protocol is None
+
+    def test_port_bounds_validated(self):
+        with pytest.raises(ValidationError):
+            ProxySettings(port=70000)
+        with pytest.raises(ValidationError):
+            ProxySettings(port=0)
+        assert ProxySettings(port=1).port == 1
+        assert ProxySettings(port=65535).port == 65535
+
+    def test_toml_proxy_section(self, tmp_path):
+        toml_path = tmp_path / "config.toml"
+        toml_path.write_text('[proxy]\nprotocol = "socks5"\nport = 3128\n')
+        source = TomlConfigSource(Settings, toml_path)
+        result = source()
+        assert result["proxy"]["protocol"] == "socks5"
+        assert result["proxy"]["port"] == 3128
+
+    def test_get_settings_reads_proxy_section(self, tmp_path, reset_toml_path):
+        source_fp = tmp_path / "source.txt"
+        source_fp.write_text("dummy")
+        toml_path = tmp_path / "config.toml"
+        toml_path.write_text(
+            "[proxy]\n"
+            'protocol = "http"\n'
+            'host = "10.0.0.1"\n'
+            "port = 8888\n"
+            "[input_data]\n"
+            f'source_file_path = "{source_fp}"\n'
+        )
+        settings = get_settings(toml_path)
+        assert settings.proxy.protocol == "http"
+        assert settings.proxy.host == "10.0.0.1"
+        assert settings.proxy.port == 8888

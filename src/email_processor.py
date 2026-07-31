@@ -13,7 +13,7 @@ from pathlib import Path
 import httpx
 from loguru import logger
 
-from src.config import Settings, get_settings
+from src.config import ProxySettings, Settings, get_settings
 from src.http_client import create_client
 
 MAX_INDIVIDUAL_ATTACHMENT = 10 * 1024 * 1024  # 10 MB
@@ -26,22 +26,28 @@ async def _resolve_client(
     client: httpx.AsyncClient | None,
     *,
     timeout: float,
+    proxy_settings: ProxySettings | None = None,
 ) -> AsyncIterator[httpx.AsyncClient]:
     """Yield an injected client or a short-lived owned one.
 
     When *client* is None, a client is created via ``create_client`` with
-    the given *timeout* and closed when the context exits. An injected
-    client is yielded as-is and is never closed by this helper.
+    the given *timeout* and *proxy_settings* and closed when the context
+    exits. An injected client is yielded as-is and is never closed by this
+    helper.
 
     Args:
         client: Optional pre-configured client injected by the caller.
         timeout: Timeout in seconds used for the owned client.
+        proxy_settings: Proxy settings for the owned short-lived client;
+            an injected client is unaffected.
 
     Yields:
         The httpx.AsyncClient to use for requests.
     """
     if client is None:
-        async with create_client(timeout=timeout) as owned:
+        async with create_client(
+            timeout=timeout, proxy_settings=proxy_settings
+        ) as owned:
             yield owned
     else:
         yield client
@@ -52,6 +58,7 @@ async def fetch_email_content(
     api_key: str,
     *,
     client: httpx.AsyncClient | None = None,
+    proxy_settings: ProxySettings | None = None,
 ) -> dict:
     """Retrieve the raw email content from the Resend Receiving API.
 
@@ -61,11 +68,15 @@ async def fetch_email_content(
         client: Optional pre-configured client to reuse; it is not closed
             by this function. When None, a short-lived client is created
             via ``create_client`` and closed automatically.
+        proxy_settings: Proxy settings for the owned short-lived client;
+            an injected *client* is unaffected.
 
     Returns:
         The full email JSON payload, including text, html, and headers.
     """
-    async with _resolve_client(client, timeout=30) as client:
+    async with _resolve_client(
+        client, timeout=30, proxy_settings=proxy_settings
+    ) as client:
         resp = await client.get(
             f"{RESEND_EMAILS_RECEIVING_BASE}/{email_id}",
             headers={"Authorization": f"Bearer {api_key}"},
@@ -79,6 +90,7 @@ async def fetch_attachments(
     api_key: str,
     *,
     client: httpx.AsyncClient | None = None,
+    proxy_settings: ProxySettings | None = None,
 ) -> list[dict]:
     """List all attachments for a received email via the Resend API.
 
@@ -88,12 +100,16 @@ async def fetch_attachments(
         client: Optional pre-configured client to reuse; it is not closed
             by this function. When None, a short-lived client is created
             via ``create_client`` and closed automatically.
+        proxy_settings: Proxy settings for the owned short-lived client;
+            an injected *client* is unaffected.
 
     Returns:
         A list of attachment metadata dicts (filename, download_url, etc.).
         Returns an empty list if no attachments are found.
     """
-    async with _resolve_client(client, timeout=30) as client:
+    async with _resolve_client(
+        client, timeout=30, proxy_settings=proxy_settings
+    ) as client:
         resp = await client.get(
             f"{RESEND_EMAILS_RECEIVING_BASE}/{email_id}/attachments",
             headers={"Authorization": f"Bearer {api_key}"},
@@ -106,6 +122,7 @@ async def download_attachment(
     download_url: str,
     *,
     client: httpx.AsyncClient | None = None,
+    proxy_settings: ProxySettings | None = None,
 ) -> bytes:
     """Download a single attachment from its temporary download URL.
 
@@ -115,6 +132,8 @@ async def download_attachment(
         client: Optional pre-configured client to reuse; it is not closed
             by this function. When None, a short-lived client is created
             via ``create_client`` and closed automatically.
+        proxy_settings: Proxy settings for the owned short-lived client;
+            an injected *client* is unaffected.
 
     Returns:
         The raw bytes of the attachment.
@@ -127,7 +146,9 @@ async def download_attachment(
             (10 MB).
         httpx.HTTPStatusError: If the download request fails.
     """
-    async with _resolve_client(client, timeout=60) as client:
+    async with _resolve_client(
+        client, timeout=60, proxy_settings=proxy_settings
+    ) as client:
         resp = await client.get(download_url, timeout=60)
         resp.raise_for_status()
         content = resp.content
@@ -148,6 +169,7 @@ async def send_reply(
     from_address: str,
     api_key: str,
     client: httpx.AsyncClient | None = None,
+    proxy_settings: ProxySettings | None = None,
 ) -> None:
     """Send a threaded reply email via the Resend send API.
 
@@ -164,11 +186,15 @@ async def send_reply(
         client: Optional pre-configured client to reuse; it is not closed
             by this function. When None, a short-lived client is created
             via ``create_client`` and closed automatically.
+        proxy_settings: Proxy settings for the owned short-lived client;
+            an injected *client* is unaffected.
     """
     if not subject.lower().startswith("re:"):
         subject = f"Re: {subject}"
 
-    async with _resolve_client(client, timeout=30) as client:
+    async with _resolve_client(
+        client, timeout=30, proxy_settings=proxy_settings
+    ) as client:
         resp = await client.post(
             f"{RESEND_API_BASE}/emails",
             headers={
