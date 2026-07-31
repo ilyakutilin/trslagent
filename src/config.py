@@ -15,7 +15,6 @@ from typing import Annotated, Any, ClassVar, Literal, Self, Type
 from iso639 import Lang
 from iso639.exceptions import InvalidLanguageValue
 from loguru import logger
-from openai.types import ReasoningEffort
 from pydantic import (
     BaseModel,
     BeforeValidator,
@@ -50,7 +49,9 @@ class LLMSettings(BaseSettings):
         default=None,
         description="Temperature for translation (lower = more consistent/literal)",
     )
-    reasoning_effort: ReasoningEffort = Field(
+    reasoning_effort: (
+        Literal["none", "minimal", "low", "medium", "high", "xhigh"] | None
+    ) = Field(
         default=None,
         description=(
             "Reasoning effort for the thinking models. "

@@ -1,22 +1,24 @@
 """LLM client for translation and review via OpenRouter API.
 
-Provides an async OpenAI-compatible client with retry logic and a cost-fetching
-utility for completion generation metadata.
+Provides an async HTTP client for OpenAI-compatible chat completions APIs
+with retry logic and a cost-fetching utility for completion generation
+metadata.
 """
 
 import asyncio
-from typing import Any
+from typing import Any, Literal
 
 import httpx
-from openai import APIConnectionError, APITimeoutError, OpenAI, RateLimitError
-from openai.types import ReasoningEffort
-from openai.types.chat import ChatCompletionMessageParam
 
 from src.config import CostSettings, Settings, logger
 
 
+class _RateLimitError(Exception):
+    """Raised when the chat completions API returns an HTTP 429 response."""
+
+
 class LLM:
-    """Async wrapper around an OpenAI-compatible chat completions API.
+    """Async HTTP client for an OpenAI-compatible chat completions API.
 
     Attributes:
         base_url: Base URL of the API endpoint.
@@ -33,7 +35,9 @@ class LLM:
         api_key: str,
         model: str,
         temperature: float | None,
-        reasoning_effort: ReasoningEffort = None,
+        reasoning_effort: (
+            Literal["none", "minimal", "low", "medium", "high", "xhigh"] | None
+        ) = None,
     ) -> None:
         """Initialize the LLM client.
 
@@ -49,23 +53,24 @@ class LLM:
         self.model = model
         self.temperature = temperature
         self.reasoning_effort = reasoning_effort
-        self._client = None
+        self._client: httpx.AsyncClient | None = None
         self._client_lock = asyncio.Lock()
 
-    def _get_llm_client(self) -> OpenAI:
-        """Create and return a synchronous OpenAI client.
+    def _get_http_client(self) -> httpx.AsyncClient:
+        """Create and return an async HTTP client.
 
         Returns:
-            Configured OpenAI client instance.
+            Configured httpx.AsyncClient instance.
 
         Raises:
             ValueError: If no API key is set.
         """
         if not self.api_key:
             raise ValueError("Set the OPENROUTER_API_KEY environment variable.")
-        return OpenAI(
+        return httpx.AsyncClient(
             base_url=self.base_url,
-            api_key=self.api_key,
+            headers={"Authorization": f"Bearer {self.api_key}"},
+            timeout=600,
         )
 
     async def get_reply_async(
@@ -75,7 +80,7 @@ class LLM:
     ) -> tuple[str, str]:
         """Send a chat completion request with retry logic.
 
-        Lazily initializes the underlying OpenAI client on first call.
+        Lazily initializes the underlying httpx AsyncClient on first call.
         Retries on timeout, rate-limit, and connection errors with exponential
         backoff (up to 5 attempts).
 
@@ -88,48 +93,57 @@ class LLM:
 
         Raises:
             RuntimeError: If all retries are exhausted for a transient error,
-                or if a non-retryable exception occurs.
-            ValueError: If the API returns an empty response content.
+                if a non-retryable exception occurs, or if the API returns
+                an empty response content.
         """
         if not self._client:
             async with self._client_lock:
                 if not self._client:
-                    self._client = self._get_llm_client()
+                    # TODO: the AsyncClient is never closed — add an async
+                    # close() hook and call it from main() / the email
+                    # pipeline to release the connection pool.
+                    self._client = self._get_http_client()
 
         max_retries = 5
         base_delay = 1.0
 
         for attempt in range(max_retries):
             try:
-                messages: list[ChatCompletionMessageParam] = [
-                    {
-                        "role": "system",
-                        "content": system_prompt,
-                    },
-                    {
-                        "role": "user",
-                        "content": user_prompt,
-                    },
-                ]
-                kwargs: dict = {
+                payload: dict[str, Any] = {
                     "model": self.model,
-                    "messages": messages,
+                    "messages": [
+                        {
+                            "role": "system",
+                            "content": system_prompt,
+                        },
+                        {
+                            "role": "user",
+                            "content": user_prompt,
+                        },
+                    ],
                     "temperature": self.temperature,
                 }
                 if self.reasoning_effort is not None:
-                    kwargs["reasoning_effort"] = self.reasoning_effort
-                response = await asyncio.to_thread(
-                    self._client.chat.completions.create,
-                    **kwargs,
-                )
-                content = response.choices[0].message.content
+                    payload["reasoning_effort"] = self.reasoning_effort
+                response = await self._client.post("/chat/completions", json=payload)
+                if response.status_code == 429:
+                    raise _RateLimitError(
+                        response.text or f"HTTP status {response.status_code}"
+                    )
+                # TODO: decide whether 502/503/504 should be retried like
+                # 429 — currently any 5xx raises immediately (documented
+                # "other errors raise immediately" contract).
+                response.raise_for_status()
+                data = response.json()
+                content = data["choices"][0]["message"]["content"]
                 if content is None:
                     raise ValueError(
                         "Translation failed: received empty response from API"
                     )
-                return content.strip(), response.id
+                completion_id = data["id"]
+                return content.strip(), completion_id
 
-            except APITimeoutError as e:
+            except httpx.TimeoutException as e:
                 if attempt == max_retries - 1:
                     raise RuntimeError(
                         f"Request timed out after {max_retries} retries. "
@@ -141,7 +155,7 @@ class LLM:
                     await asyncio.sleep(wait_time)
                 continue
 
-            except RateLimitError as e:
+            except _RateLimitError as e:
                 if attempt == max_retries - 1:
                     raise RuntimeError(
                         f"Rate limit exceeded after {max_retries} retries. "
@@ -153,7 +167,7 @@ class LLM:
                     await asyncio.sleep(wait_time)
                 continue
 
-            except APIConnectionError as e:
+            except httpx.TransportError as e:
                 if attempt == max_retries - 1:
                     raise RuntimeError(
                         f"Network error after {max_retries} retries. "

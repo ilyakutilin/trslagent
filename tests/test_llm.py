@@ -1,10 +1,10 @@
+import json
+from typing import Any
+
 import httpx
 import pytest
 import respx
 from iso639 import Lang
-from openai import APIConnectionError, APITimeoutError, RateLimitError
-from openai.types.chat.chat_completion import ChatCompletion, Choice
-from openai.types.chat.chat_completion_message import ChatCompletionMessage
 
 from src.config import CostSettings, InputData, Settings
 from src.llm import LLM, _find_key, fetch_cost, resolve_and_log_cost
@@ -146,25 +146,16 @@ class TestFetchCost:
         assert "after 5 retries" in warning_msg
 
 
-def _make_completion(
+def _make_completion_response(
     content: str | None, completion_id: str = "test-id"
-) -> ChatCompletion:
-    return ChatCompletion(
-        id=completion_id,
-        choices=[
-            Choice(
-                finish_reason="stop",
-                index=0,
-                message=ChatCompletionMessage(
-                    content=content,
-                    role="assistant",
-                ),
-            )
-        ],
-        created=1,
-        model="test-model",
-        object="chat.completion",
-    )
+) -> dict[str, Any]:
+    return {
+        "id": completion_id,
+        "choices": [{"message": {"content": content}}],
+        "created": 1,
+        "model": "test-model",
+        "object": "chat.completion",
+    }
 
 
 class TestLLM:
@@ -178,102 +169,111 @@ class TestLLM:
         )
 
     @pytest.mark.asyncio
-    async def test_get_reply_success(self, llm: LLM, mocker):
-        mock_client = mocker.MagicMock()
-        mock_client.chat.completions.create.return_value = _make_completion(
-            "Translated text"
-        )
-        llm._client = mock_client
-
-        text, cid = await llm.get_reply_async("system", "user")
+    async def test_get_reply_success(self, llm: LLM):
+        with respx.mock() as mock:
+            route = mock.post("https://test.api/chat/completions").respond(
+                json=_make_completion_response("Translated text")
+            )
+            text, cid = await llm.get_reply_async("system", "user")
         assert text == "Translated text"
         assert cid == "test-id"
-        mock_client.chat.completions.create.assert_called_once_with(
+        assert route.calls.last.request.headers["Authorization"] == "Bearer test-key"
+        payload = json.loads(route.calls.last.request.content)
+        assert payload["model"] == "test-model"
+        assert payload["messages"] == [
+            {"role": "system", "content": "system"},
+            {"role": "user", "content": "user"},
+        ]
+        assert payload["temperature"] == 0.3
+        assert "reasoning_effort" not in payload
+
+    @pytest.mark.asyncio
+    async def test_get_reply_sends_reasoning_effort(self):
+        llm = LLM(
+            base_url="https://test.api",
+            api_key="test-key",
             model="test-model",
-            messages=[
-                {"role": "system", "content": "system"},
-                {"role": "user", "content": "user"},
-            ],
             temperature=0.3,
+            reasoning_effort="high",
         )
+        with respx.mock() as mock:
+            route = mock.post("https://test.api/chat/completions").respond(
+                json=_make_completion_response("Translated text")
+            )
+            await llm.get_reply_async("system", "user")
+        payload = json.loads(route.calls.last.request.content)
+        assert payload["reasoning_effort"] == "high"
 
     @pytest.mark.asyncio
     async def test_get_reply_timeout_retry(self, llm: LLM, mocker):
-        mock_client = mocker.MagicMock()
-        mock_client.chat.completions.create.side_effect = [
-            APITimeoutError(request=httpx.Request("POST", "https://example.com")),
-            _make_completion("Recovered text"),
-        ]
-        llm._client = mock_client
         mock_sleep = mocker.patch("asyncio.sleep")
-        mocker.patch(
-            "src.llm.asyncio.to_thread",
-            side_effect=lambda fn, **kw: fn(**kw),
-        )
+        with respx.mock() as mock:
+            route = mock.post("https://test.api/chat/completions")
+            route.side_effect = [
+                httpx.TimeoutException("timeout"),
+                httpx.Response(200, json=_make_completion_response("Recovered text")),
+            ]
 
-        text, _ = await llm.get_reply_async("system", "user")
+            text, _ = await llm.get_reply_async("system", "user")
         assert text == "Recovered text"
-        assert mock_client.chat.completions.create.call_count == 2
+        assert len(route.calls) == 2
         mock_sleep.assert_called_once_with(1.0)
 
     @pytest.mark.asyncio
     async def test_get_reply_rate_limit_retry(self, llm: LLM, mocker):
-        mock_client = mocker.MagicMock()
-        mock_client.chat.completions.create.side_effect = [
-            RateLimitError(
-                message="Rate limit",
-                response=mocker.MagicMock(status_code=429),
-                body=None,
-            ),
-            _make_completion("Recovered text"),
-        ]
-        llm._client = mock_client
         mock_sleep = mocker.patch("asyncio.sleep")
-        mocker.patch(
-            "src.llm.asyncio.to_thread",
-            side_effect=lambda fn, **kw: fn(**kw),
-        )
+        with respx.mock() as mock:
+            route = mock.post("https://test.api/chat/completions")
+            route.side_effect = [
+                httpx.Response(429),
+                httpx.Response(200, json=_make_completion_response("Recovered text")),
+            ]
 
-        text, _ = await llm.get_reply_async("system", "user")
+            text, _ = await llm.get_reply_async("system", "user")
         assert text == "Recovered text"
-        assert mock_client.chat.completions.create.call_count == 2
+        assert len(route.calls) == 2
         mock_sleep.assert_called_once_with(1.0)
 
     @pytest.mark.asyncio
     async def test_get_reply_connection_error_retry(self, llm: LLM, mocker):
-        mock_client = mocker.MagicMock()
-        mock_client.chat.completions.create.side_effect = [
-            APIConnectionError(request=mocker.MagicMock()),
-            _make_completion("Recovered text"),
-        ]
-        llm._client = mock_client
         mock_sleep = mocker.patch("asyncio.sleep")
-        mocker.patch(
-            "src.llm.asyncio.to_thread",
-            side_effect=lambda fn, **kw: fn(**kw),
-        )
+        with respx.mock() as mock:
+            route = mock.post("https://test.api/chat/completions")
+            route.side_effect = [
+                httpx.ConnectError("conn refused"),
+                httpx.Response(200, json=_make_completion_response("Recovered text")),
+            ]
 
-        text, _ = await llm.get_reply_async("system", "user")
+            text, _ = await llm.get_reply_async("system", "user")
         assert text == "Recovered text"
-        assert mock_client.chat.completions.create.call_count == 2
+        assert len(route.calls) == 2
+        mock_sleep.assert_called_once_with(1.0)
+
+    @pytest.mark.asyncio
+    async def test_get_reply_transport_error_retry(self, llm: LLM, mocker):
+        mock_sleep = mocker.patch("asyncio.sleep")
+        with respx.mock() as mock:
+            route = mock.post("https://test.api/chat/completions")
+            route.side_effect = [
+                httpx.ReadError("conn reset"),
+                httpx.Response(200, json=_make_completion_response("Recovered text")),
+            ]
+
+            text, _ = await llm.get_reply_async("system", "user")
+        assert text == "Recovered text"
+        assert len(route.calls) == 2
         mock_sleep.assert_called_once_with(1.0)
 
     @pytest.mark.asyncio
     async def test_get_reply_timeout_exhausted(self, llm: LLM, mocker):
-        mock_client = mocker.MagicMock()
-        mock_client.chat.completions.create.side_effect = APITimeoutError(
-            request=httpx.Request("POST", "https://example.com")
-        )
-        llm._client = mock_client
         mock_sleep = mocker.patch("asyncio.sleep")
-        mocker.patch(
-            "src.llm.asyncio.to_thread",
-            side_effect=lambda fn, **kw: fn(**kw),
-        )
+        with respx.mock() as mock:
+            route = mock.post("https://test.api/chat/completions")
+            route.side_effect = httpx.TimeoutException("timeout")
 
-        with pytest.raises(RuntimeError, match="timed out after 5 retries"):
-            await llm.get_reply_async("system", "user")
-        assert mock_client.chat.completions.create.call_count == 5
+            with pytest.raises(RuntimeError, match="timed out after 5 retries"):
+                await llm.get_reply_async("system", "user")
+        assert len(route.calls) == 5
         assert mock_sleep.call_args_list == [
             mocker.call(1.0),
             mocker.call(2.0),
@@ -283,22 +283,16 @@ class TestLLM:
 
     @pytest.mark.asyncio
     async def test_get_reply_rate_limit_exhausted(self, llm: LLM, mocker):
-        mock_client = mocker.MagicMock()
-        mock_client.chat.completions.create.side_effect = RateLimitError(
-            message="Rate limit",
-            response=mocker.MagicMock(status_code=429),
-            body=None,
-        )
-        llm._client = mock_client
         mock_sleep = mocker.patch("asyncio.sleep")
-        mocker.patch(
-            "src.llm.asyncio.to_thread",
-            side_effect=lambda fn, **kw: fn(**kw),
-        )
+        with respx.mock() as mock:
+            route = mock.post("https://test.api/chat/completions")
+            route.side_effect = [httpx.Response(429)] * 5
 
-        with pytest.raises(RuntimeError, match="Rate limit exceeded after 5 retries"):
-            await llm.get_reply_async("system", "user")
-        assert mock_client.chat.completions.create.call_count == 5
+            with pytest.raises(
+                RuntimeError, match="Rate limit exceeded after 5 retries"
+            ):
+                await llm.get_reply_async("system", "user")
+        assert len(route.calls) == 5
         assert mock_sleep.call_args_list == [
             mocker.call(1.0),
             mocker.call(2.0),
@@ -308,20 +302,14 @@ class TestLLM:
 
     @pytest.mark.asyncio
     async def test_get_reply_connection_error_exhausted(self, llm: LLM, mocker):
-        mock_client = mocker.MagicMock()
-        mock_client.chat.completions.create.side_effect = APIConnectionError(
-            request=mocker.MagicMock()
-        )
-        llm._client = mock_client
         mock_sleep = mocker.patch("asyncio.sleep")
-        mocker.patch(
-            "src.llm.asyncio.to_thread",
-            side_effect=lambda fn, **kw: fn(**kw),
-        )
+        with respx.mock() as mock:
+            route = mock.post("https://test.api/chat/completions")
+            route.side_effect = httpx.ConnectError("conn refused")
 
-        with pytest.raises(RuntimeError, match="Network error after 5 retries"):
-            await llm.get_reply_async("system", "user")
-        assert mock_client.chat.completions.create.call_count == 5
+            with pytest.raises(RuntimeError, match="Network error after 5 retries"):
+                await llm.get_reply_async("system", "user")
+        assert len(route.calls) == 5
         assert mock_sleep.call_args_list == [
             mocker.call(1.0),
             mocker.call(2.0),
@@ -330,25 +318,57 @@ class TestLLM:
         ]
 
     @pytest.mark.asyncio
-    async def test_get_reply_empty_content(self, llm: LLM, mocker):
-        mock_client = mocker.MagicMock()
-        mock_client.chat.completions.create.return_value = _make_completion(None)
-        llm._client = mock_client
+    async def test_get_reply_empty_content(self, llm: LLM):
+        with respx.mock() as mock:
+            mock.post("https://test.api/chat/completions").respond(
+                json=_make_completion_response(None)
+            )
 
-        with pytest.raises(
-            RuntimeError,
-            match="Translation failed: received empty response from API",
-        ):
-            await llm.get_reply_async("system", "user")
+            with pytest.raises(
+                RuntimeError,
+                match="Translation failed: received empty response from API",
+            ):
+                await llm.get_reply_async("system", "user")
 
     @pytest.mark.asyncio
-    async def test_get_reply_unexpected_exception(self, llm: LLM, mocker):
-        mock_client = mocker.MagicMock()
-        mock_client.chat.completions.create.side_effect = ValueError("unexpected")
-        llm._client = mock_client
+    async def test_get_reply_unexpected_exception(self, llm: LLM):
+        with respx.mock() as mock:
+            route = mock.post("https://test.api/chat/completions")
+            route.side_effect = ValueError("unexpected")
 
-        with pytest.raises(RuntimeError, match="Translation failed"):
-            await llm.get_reply_async("system", "user")
+            with pytest.raises(RuntimeError, match="Translation failed"):
+                await llm.get_reply_async("system", "user")
+        assert len(route.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_get_reply_http_500_no_retry(self, llm: LLM):
+        with respx.mock() as mock:
+            route = mock.post("https://test.api/chat/completions").respond(
+                status_code=500
+            )
+
+            with pytest.raises(RuntimeError, match="Translation failed"):
+                await llm.get_reply_async("system", "user")
+        assert len(route.calls) == 1
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "response_kwargs",
+        [
+            {"content": b"not json"},
+            {"json": {}},
+            {"json": {"choices": []}},
+        ],
+    )
+    async def test_get_reply_malformed_response(self, llm: LLM, response_kwargs):
+        with respx.mock() as mock:
+            route = mock.post("https://test.api/chat/completions").respond(
+                **response_kwargs
+            )
+
+            with pytest.raises(RuntimeError, match="Translation failed"):
+                await llm.get_reply_async("system", "user")
+        assert len(route.calls) == 1
 
     @pytest.mark.asyncio
     async def test_init_no_api_key_lazy_raise(self):

@@ -12,6 +12,19 @@ def _suppress_loguru():
     logger.add(lambda _: None, level="ERROR")
 
 
+@pytest.fixture(autouse=True)
+def _clear_proxy_env(monkeypatch):
+    for name in (
+        "ALL_PROXY",
+        "all_proxy",
+        "HTTPS_PROXY",
+        "https_proxy",
+        "HTTP_PROXY",
+        "http_proxy",
+    ):
+        monkeypatch.delenv(name, raising=False)
+
+
 @pytest.fixture(scope="session")
 def en_lang() -> Lang:
     return Lang("en")

@@ -1,6 +1,6 @@
 # AGENTS.md
 
-## Entrypoint
+## CLI Entrypoint
 
 - The CLI entrypoint is `python src/cli.py <config.toml>` — a single config-driven entrypoint.
 - Additional subcommands:
@@ -37,7 +37,9 @@
 ## LLM
 
 - Uses OpenRouter or any OpenAI-compatible API. Default base URL: `https://openrouter.ai/api/v1`.
-- 5 retries with exponential backoff for timeout/rate-limit/connection errors. Other errors raise immediately.
+- The LLM client (`src/llm.py`) makes **direct async httpx calls** — there is NO OpenAI SDK dependency. `POST {base_url}/chat/completions` with `Authorization: Bearer <key>`, `model`/`messages`/`temperature` (+ optional `reasoning_effort`) in the JSON body; the response is parsed manually (`choices[0].message.content`, `id`). `reasoning_effort` is typed as `Literal["none", "minimal", "low", "medium", "high", "xhigh"] | None` in `src/config.py`.
+- 5 retries with exponential backoff (1/2/4/8s) for timeout / HTTP 429 / `httpx.TransportError` (timeout branch is caught first — `httpx.TimeoutException` is a `TransportError` subclass). Other errors raise immediately as `RuntimeError("Translation failed: ...")`.
+- **Proxy sensitivity (important for future proxy work)**: every `httpx.AsyncClient` in the project (`src/llm.py`, `src/email_processor.py`) honors proxy env vars (`ALL_PROXY`, `HTTPS_PROXY`, etc.) via httpx's default `trust_env=True`. If a SOCKS proxy var is set (e.g. `ALL_PROXY=socks5h://...`) but `socksio` is not installed, `httpx.AsyncClient.__init__` raises `ImportError` **before any request is sent** — this historically broke tests opaquely (respx "route not called" / raw ImportError). When adding proxy functionality, decide explicitly: `trust_env` / explicit proxy args on the clients, `socksio` as a dependency, and don't rely on the test fixture below for proxy-specific tests.
 - `--print-prompt-only` / `print_prompt_only: true` skips LLM calls and prints the constructed prompts to stdout.
 
 ## Review Mode
@@ -82,8 +84,20 @@
 - Linting and formatting is done by ruff.
 - Type checking is done by pyright.
 - Always run ruff check, ruff format, pyright, pytest after completion of any code modification to check that nothing is broken, and fix the errors if any.
+- **Proxy env vars are cleared for tests**: the autouse `_clear_proxy_env` fixture in `tests/conftest.py` deletes `ALL_PROXY`/`HTTPS_PROXY`/`HTTP_PROXY` (upper- and lower-case) for every test, so developer shells with proxies configured don't break httpx-based tests (see the proxy sensitivity note in the LLM section). The fixture exists for test isolation — do not write proxy-behavior tests relying on it; set up proxy env vars explicitly per-test if needed.
 - No CI/CD in the project.
 
 ## Language
 
 All the comments and documentation in the project shall be in English. All communication with the user shall be in English.
+
+## Documentation
+
+All the functions, methods, and classes shall have Google-style docstrings in English. Even the private functions and methods shall be documented. The only exception is dunder methods like `__init__()`, `__str__()` which can stay without docstrings. If you make changes in a function or method or class that changes the arguments or attributes or return values or potential errors you have to modify the corresponding docstring accordingly.
+
+README.md shall be maintained properly. Check README.md after any change in code or adding new features and change / supplement it accordingly.
+AGENTS.md shall be maintained properly. Check AGENTS.md after any change in code or adding new features and change / supplement it accordingly (only if the changes you made are important enough for future LLM instances to know about them immediately).
+
+## Logging
+
+Each action and stage in the code implementation shall be logged. The logging level used for each logging statement is up to you and shall be selected based on the circumstances.
