@@ -711,6 +711,55 @@ class TestServe:
         mock_client.aclose.assert_awaited_once()
         runner_instance.cleanup.assert_called_once()
 
+    async def test_closes_shared_http_client_on_startup_failure(self, mocker):
+        mock_app = mocker.MagicMock()
+        mocker.patch("src.email_server.web.Application", return_value=mock_app)
+        mock_runner = mocker.patch("aiohttp.web.AppRunner", autospec=True)
+        mock_site = mocker.patch("aiohttp.web.TCPSite", autospec=True)
+        runner_instance = mock_runner.return_value
+        runner_instance.setup = AsyncMock()
+        runner_instance.cleanup = AsyncMock()
+        site_instance = mock_site.return_value
+        site_instance.start = AsyncMock(side_effect=OSError("address in use"))
+
+        mock_client = AsyncMock()
+        mock_create = mocker.patch(
+            "src.email_server.create_client", return_value=mock_client
+        )
+
+        cfg = _make_cfg({"listen_host": "127.0.0.1", "listen_port": 9999})
+        with pytest.raises(OSError, match="address in use"):
+            await serve(cfg)
+
+        mock_create.assert_called_once_with()
+        runner_instance.cleanup.assert_called_once()
+        mock_client.aclose.assert_awaited_once()
+
+    async def test_closes_shared_http_client_when_runner_cleanup_fails(self, mocker):
+        mock_app = mocker.MagicMock()
+        mocker.patch("src.email_server.web.Application", return_value=mock_app)
+        mock_runner = mocker.patch("aiohttp.web.AppRunner", autospec=True)
+        mock_site = mocker.patch("aiohttp.web.TCPSite", autospec=True)
+        runner_instance = mock_runner.return_value
+        runner_instance.setup = AsyncMock()
+        runner_instance.cleanup = AsyncMock(side_effect=RuntimeError("cleanup boom"))
+        site_instance = mock_site.return_value
+        site_instance.start = AsyncMock()
+
+        mock_client = AsyncMock()
+        mocker.patch("src.email_server.create_client", return_value=mock_client)
+
+        event_mock = mocker.patch("asyncio.Event")
+        event_instance = event_mock.return_value
+        event_instance.wait = AsyncMock(side_effect=KeyboardInterrupt)
+
+        cfg = _make_cfg({"listen_host": "127.0.0.1", "listen_port": 9999})
+        with pytest.raises(KeyboardInterrupt):
+            await serve(cfg)
+
+        runner_instance.cleanup.assert_called_once()
+        mock_client.aclose.assert_awaited_once()
+
 
 class TestSendErrorReply:
     async def test_calls_send_reply_with_correct_params(self, mocker):

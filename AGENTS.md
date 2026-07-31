@@ -52,14 +52,14 @@
 ## Email Server (Webhook)
 
 - Started via `python src/cli.py serve-emails <config.toml>`.
-- **Shared HTTP client**: `serve()` creates one shared `httpx.AsyncClient` for the whole server lifetime (stored as `app["http_client"]`, threaded through `_handle_webhook`/`_process_inbound` into the `src/email_processor.py` functions) and closes it in `serve()`'s `finally` (close failures only log warnings). The email_processor functions accept an optional injected `client` param and otherwise create a short-lived self-closing client via `create_client`.
+- **Shared HTTP client**: `serve()` creates one shared `httpx.AsyncClient` for the whole server lifetime (stored as `app["http_client"]`, threaded through `_handle_webhook`/`_process_inbound` into the `src/email_processor.py` functions) and closes it in `serve()`'s `finally` (close failures only log warnings). The client is closed even when startup fails (e.g. port in use) or when runner cleanup fails — both failures only log warnings. The email_processor functions accept an optional injected `client` param and otherwise create a short-lived self-closing client via `create_client`.
 - Runs an `aiohttp` HTTP server on `email.listen_host`:`email.listen_port` (default `0.0.0.0:8025`).
 - Listens on `POST /webhook/email` for Resend inbound email webhooks.
 - Uses `src/email_server.py` (server) + `src/email_processor.py` (Resend API client).
 - **Svix signature verification**: webhook payloads are verified via HMAC-SHA256 against `email.resend_webhook_secret` (`whsec_...`), with a 5-minute timestamp tolerance window. If no secret is configured, verification is skipped (logged warning).
 - **Sender whitelist**: if `email.sender_whitelist_enabled` is true (default), only senders in `email.allowed_senders` are accepted. An empty list disables enforcement.
 - **Recipient filtering**: if `email.allowed_recipient` is set, only webhooks for that specific To address are processed; others are silently ignored.
-- On receipt: fetches the email body and attachment list from the Resend Receiving API, downloads each attachment (cap: `email.max_attachment_size_mb`, default 10 MB per file).
+- On receipt: fetches the email body and attachment list from the Resend Receiving API, downloads each attachment (cap: `email.max_attachment_size_mb`, default 10 MB per file; downloads use a 60s per-request timeout even when the shared client is injected).
 - **Configuration from attachments**:
   - `config.toml` (optional) — per-request settings; file-path keys are patched out so `InputData` validation doesn't try to read missing files. Falls back to the server's default config loaded at startup.
   - `source.txt` — source text; if absent, the plain-text email body is used.

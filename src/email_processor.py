@@ -119,13 +119,16 @@ async def download_attachment(
     Returns:
         The raw bytes of the attachment.
 
+    The request is sent with a 60-second timeout regardless of whether an
+    injected client or an owned one is used.
+
     Raises:
         ValueError: If the attachment exceeds ``MAX_INDIVIDUAL_ATTACHMENT``
             (10 MB).
         httpx.HTTPStatusError: If the download request fails.
     """
     async with _resolve_client(client, timeout=60) as client:
-        resp = await client.get(download_url)
+        resp = await client.get(download_url, timeout=60)
         resp.raise_for_status()
         content = resp.content
         if len(content) > MAX_INDIVIDUAL_ATTACHMENT:

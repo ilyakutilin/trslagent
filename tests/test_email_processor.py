@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 import httpx
@@ -176,6 +177,22 @@ class TestDownloadAttachment:
             )
             assert result == b"hello world"
             assert not client.is_closed
+        finally:
+            await client.aclose()
+
+    async def test_injected_client_slow_response_still_succeeds(self):
+        async def slow_handler(request: httpx.Request) -> httpx.Response:
+            await asyncio.sleep(0.05)
+            return httpx.Response(200, content=b"hello world")
+
+        client = httpx.AsyncClient(
+            transport=httpx.MockTransport(slow_handler), timeout=0.01
+        )
+        try:
+            result = await download_attachment(
+                "https://storage.example.com/slow.bin", client=client
+            )
+            assert result == b"hello world"
         finally:
             await client.aclose()
 

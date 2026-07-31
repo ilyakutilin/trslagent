@@ -466,8 +466,9 @@ async def serve(cfg: Settings) -> None:
     shared httpx.AsyncClient is created for the server's lifetime, stored
     on the application (``app["http_client"]``), and reused across the
     whole Resend request chain (content fetch, attachment download,
-    reply sending). The client is closed on shutdown; a failure to close
-    it is logged but never crashes the server.
+    reply sending). The client is closed on shutdown or when startup
+    fails; a failure to clean up the runner or close the client is
+    logged but never crashes the server.
 
     Args:
         cfg: Server configuration (Settings object).
@@ -483,20 +484,23 @@ async def serve(cfg: Settings) -> None:
     )
 
     runner = web.AppRunner(app)
-    await runner.setup()
-    site = web.TCPSite(runner, email_cfg.listen_host, email_cfg.listen_port)
-    await site.start()
-
-    logger.info(
-        "Email webhook server listening on {}:{}",
-        email_cfg.listen_host,
-        email_cfg.listen_port,
-    )
-
     try:
+        await runner.setup()
+        site = web.TCPSite(runner, email_cfg.listen_host, email_cfg.listen_port)
+        await site.start()
+
+        logger.info(
+            "Email webhook server listening on {}:{}",
+            email_cfg.listen_host,
+            email_cfg.listen_port,
+        )
+
         await asyncio.Event().wait()
     finally:
-        await runner.cleanup()
+        try:
+            await runner.cleanup()
+        except Exception as e:
+            logger.warning(f"Failed to clean up app runner: {e}")
         try:
             await http_client.aclose()
         except Exception as e:
