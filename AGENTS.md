@@ -101,3 +101,7 @@ AGENTS.md shall be maintained properly. Check AGENTS.md after any change in code
 ## Logging
 
 Each action and stage in the code implementation shall be logged. The logging level used for each logging statement is up to you and shall be selected based on the circumstances.
+
+## Process
+
+Whenever you need to implement a new feature or make a change in the code in build mode, you act as an orchestrator. Identify the available sub-agents suitable for each task and delegate the relevant tasks and TODO items to corresponding sub-agents. Control their work and act on their findings if necessary. Avoid making changes on your own in order to keep yourself within the reasonable context length to avoid hallucinations.
