@@ -13,7 +13,7 @@ variables are honored (httpx ``trust_env=True``).
 import asyncio
 import os
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit, urlunsplit
 
 import httpx
 
@@ -47,6 +47,32 @@ class ProxyConfigError(ValueError):
     """Raised when proxy settings cannot be resolved into client kwargs."""
 
 
+def _mask_proxy_url(url: str) -> str:
+    """Mask credentials embedded in a proxy URL for safe logging.
+
+    ``http://user:pass@host:3128`` is rendered as
+    ``http://user:***@host:3128``; URLs without a password are returned
+    unchanged.
+
+    Args:
+        url: The proxy URL (as found in the environment).
+
+    Returns:
+        The URL with any embedded password replaced by ``***``.
+    """
+    parts = urlsplit(url)
+    if parts.password is None:
+        return url
+    netloc = parts.hostname or ""
+    if parts.port:
+        netloc += f":{parts.port}"
+    if parts.username:
+        netloc = f"{parts.username}:***@{netloc}"
+    else:
+        netloc = f"***@{netloc}"
+    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+
+
 def resolve_proxy_kwargs(proxy_settings: ProxySettings | None) -> dict[str, Any]:
     """Resolve proxy settings into httpx.AsyncClient constructor kwargs.
 
@@ -63,8 +89,9 @@ def resolve_proxy_kwargs(proxy_settings: ProxySettings | None) -> dict[str, Any]
        and ``{"proxy": url, "trust_env": False}`` is returned (explicit
        config takes precedence over env vars).
     4. ``protocol`` unset — any of ``PROXY_ENV_VARS`` set and non-empty
-       after strip yields ``{"trust_env": True}``; otherwise
-       ``ProxyConfigError`` is raised.
+       after strip yields ``{"trust_env": True}``; the specific variable
+       names and values are logged (credentials embedded in proxy URLs
+       are masked); otherwise ``ProxyConfigError`` is raised.
 
     Args:
         proxy_settings: Optional proxy settings; None triggers the legacy
@@ -107,7 +134,17 @@ def resolve_proxy_kwargs(proxy_settings: ProxySettings | None) -> dict[str, Any]
         )
         return {"proxy": proxy_url, "trust_env": False}
     if any(os.getenv(var, "").strip() for var in PROXY_ENV_VARS):
-        logger.info("Proxy: using proxy settings from environment variables")
+        env_proxies = {
+            var: (os.getenv(var) or "").strip()
+            for var in PROXY_ENV_VARS
+            if os.getenv(var, "").strip()
+        }
+        logger.info(
+            "Proxy: using proxy settings from environment variables: {}",
+            ", ".join(
+                f"{var}={_mask_proxy_url(value)}" for var, value in env_proxies.items()
+            ),
+        )
         return {"trust_env": True}
     raise ProxyConfigError(
         "No proxy configured: set [proxy] settings "

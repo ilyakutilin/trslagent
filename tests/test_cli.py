@@ -7,6 +7,7 @@ from iso639 import Lang
 
 from src.cli import cli
 from src.config import Settings
+from src.http_client import ProxyConfigError
 
 
 @pytest.fixture(autouse=True)
@@ -182,6 +183,49 @@ print_prompt_only = true
         mock_main.assert_called_once()
         cfg = mock_main.call_args.kwargs["cfg"]
         assert cfg.output_data.print_prompt_only is True
+
+
+class TestProxyConfigError:
+    def _write_basic_toml(self, tmp_path):
+        toml_path = tmp_path / "config.toml"
+        _write_toml(toml_path, BASIC_TOML)
+        return toml_path
+
+    def test_translation_mode_logs_and_exits_with_code_1(self, tmp_path, mocker):
+        mock_logger = mocker.patch("src.cli.logger.error")
+        mocker.patch("src.cli.main", new_callable=AsyncMock)
+        toml_path = self._write_basic_toml(tmp_path)
+        mocker.patch.object(sys, "argv", ["cli.py", str(toml_path)])
+        mocker.patch(
+            "asyncio.run",
+            side_effect=ProxyConfigError("No proxy configured"),
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            cli()
+
+        assert exc_info.value.code == 1
+        mock_logger.assert_called_once()
+        assert "Proxy configuration error" in mock_logger.call_args.args[0]
+        assert "No proxy configured" in str(mock_logger.call_args.args[1])
+
+    def test_serve_emails_logs_and_exits_with_code_1(self, tmp_path, mocker):
+        mock_logger = mocker.patch("src.cli.logger.error")
+        mocker.patch("src.email_server.serve", new_callable=AsyncMock)
+        toml_path = self._write_basic_toml(tmp_path)
+        mocker.patch.object(sys, "argv", ["cli.py", "serve-emails", str(toml_path)])
+        mocker.patch(
+            "asyncio.run",
+            side_effect=ProxyConfigError("No proxy configured"),
+        )
+
+        with pytest.raises(SystemExit) as exc_info:
+            cli()
+
+        assert exc_info.value.code == 1
+        mock_logger.assert_called_once()
+        assert "Proxy configuration error" in mock_logger.call_args.args[0]
+        assert "No proxy configured" in str(mock_logger.call_args.args[1])
 
 
 class TestServeEmails:

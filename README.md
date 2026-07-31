@@ -184,8 +184,8 @@ All outbound HTTP traffic (LLM calls, cost lookup, Resend email API) goes throug
 
 - **Master switch** — `enabled` (default `true`). When `false`, all requests go direct and proxy env vars (`ALL_PROXY`, `HTTPS_PROXY`, `HTTP_PROXY`) are ignored.
 - **Explicit config** — set `protocol` (one of `http`, `https`, `socks5`, `socks5h`, `socks4`, `socks4a`) plus `host`/`port`/`username` to build `protocol://[user:pass@]host:port`; this takes precedence over env vars.
-- **Env-var fallback** — with no `protocol` set, the standard proxy env vars (`ALL_PROXY`/`all_proxy`, `HTTPS_PROXY`/`https_proxy`, `HTTP_PROXY`/`http_proxy`) are honored — the previous default behavior.
-- **Fail-fast** — proxy enabled with no `protocol` and none of those env vars set → an error is raised (deliberate). The message points to the `[proxy]`/`PROXY__*` settings, the env vars, or `PROXY__ENABLED=false`.
+- **Env-var fallback** — with no `protocol` set, the standard proxy env vars (`ALL_PROXY`/`all_proxy`, `HTTPS_PROXY`/`https_proxy`, `HTTP_PROXY`/`http_proxy`) are honored — the previous default behavior. The specific variable names and values are logged at startup (credentials embedded in proxy URLs are masked as `user:***@host:port`).
+- **Fail-fast** — proxy enabled with no `protocol` and none of those env vars set → an error is raised (deliberate). The message points to the `[proxy]`/`PROXY__*` settings, the env vars, or `PROXY__ENABLED=false`. In CLI mode the error is logged and the process exits with code 1 instead of dumping a traceback.
 - **Password** — `password` is a secret: set it via `PROXY__PASSWORD` in `.env` only, never in TOML.
 - **SOCKS** — `socks5`/`socks5h`/`socks4`/`socks4a` require the `socksio` package (installed via `httpx[socks]`).
 

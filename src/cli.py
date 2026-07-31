@@ -4,10 +4,15 @@ Supports translation, review, glossary matching, and email webhook server modes.
 
 import asyncio
 import sys
+from collections.abc import Coroutine
 from pathlib import Path
+from typing import Any, TypeVar
 
-from src.config import get_settings
+from src.config import get_settings, logger
+from src.http_client import ProxyConfigError
 from src.main import export_glossary_matches, main
+
+T = TypeVar("T")
 
 
 USAGE = (
@@ -49,6 +54,32 @@ def _parse_glossary_args(args: list[str]) -> tuple[bool, Path | None, list[str]]
     return match_glossary, match_output_path, args
 
 
+def _run_or_exit(awaitable: Coroutine[Any, Any, T]) -> T:
+    """Run an awaitable and exit gracefully on proxy configuration errors.
+
+    Executes *awaitable* via ``asyncio.run``. When the proxy is enabled
+    but no proxy settings and no proxy environment variables are
+    available, ``ProxyConfigError`` is raised deep inside the pipeline
+    (e.g. at client construction); instead of leaking a raw traceback to
+    the user, the error is logged and the process exits with status 1.
+
+    Args:
+        awaitable: Coroutine to run.
+
+    Returns:
+        The coroutine's return value.
+
+    Raises:
+        SystemExit: With status 1 when ``ProxyConfigError`` is raised
+            while running *awaitable*.
+    """
+    try:
+        return asyncio.run(awaitable)
+    except ProxyConfigError as e:
+        logger.error("Proxy configuration error: {}", e)
+        sys.exit(1)
+
+
 def cli() -> None:
     """Main CLI entrypoint.
 
@@ -72,7 +103,7 @@ def cli() -> None:
         from src.email_server import serve
 
         settings = get_settings(toml_path=toml_path)
-        asyncio.run(serve(cfg=settings))
+        _run_or_exit(serve(cfg=settings))
         return
 
     match_glossary, match_output_path, args = _parse_glossary_args(args)
@@ -93,7 +124,7 @@ def cli() -> None:
             f.write(result)
         return
 
-    pipeline_result = asyncio.run(main(cfg=settings))
+    pipeline_result = _run_or_exit(main(cfg=settings))
     if pipeline_result is not None:
         translation = pipeline_result.text
     else:

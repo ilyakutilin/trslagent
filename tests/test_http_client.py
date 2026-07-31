@@ -247,6 +247,48 @@ class TestProxyResolution:
         monkeypatch.setenv("https_proxy", "http://proxy:3128")
         assert resolve_proxy_kwargs(ProxySettings()) == {"trust_env": True}
 
+    def test_env_var_logged_with_name_and_value(self, mocker, monkeypatch):
+        mock_log = mocker.patch("src.http_client.logger.info")
+        monkeypatch.setenv("ALL_PROXY", "http://proxy:3128")
+
+        resolve_proxy_kwargs(ProxySettings())
+
+        log_text = " ".join(str(a) for a in mock_log.call_args.args)
+        assert "ALL_PROXY" in log_text
+        assert "http://proxy:3128" in log_text
+
+    def test_all_set_env_vars_logged(self, mocker, monkeypatch):
+        mock_log = mocker.patch("src.http_client.logger.info")
+        monkeypatch.setenv("ALL_PROXY", "http://proxy-a:3128")
+        monkeypatch.setenv("https_proxy", "http://proxy-b:8443")
+
+        resolve_proxy_kwargs(ProxySettings())
+
+        log_text = " ".join(str(a) for a in mock_log.call_args.args)
+        assert "ALL_PROXY=http://proxy-a:3128" in log_text
+        assert "https_proxy=http://proxy-b:8443" in log_text
+
+    def test_env_var_password_masked_in_log(self, mocker, monkeypatch):
+        mock_log = mocker.patch("src.http_client.logger.info")
+        monkeypatch.setenv("HTTPS_PROXY", "http://user:secret@proxy:8443")
+
+        resolve_proxy_kwargs(ProxySettings())
+
+        log_text = " ".join(str(a) for a in mock_log.call_args.args)
+        assert "secret" not in log_text
+        assert "user:***@proxy:8443" in log_text
+
+    def test_env_var_url_without_credentials_logged_unchanged(
+        self, mocker, monkeypatch
+    ):
+        mock_log = mocker.patch("src.http_client.logger.info")
+        monkeypatch.setenv("ALL_PROXY", "http://proxy:3128")
+
+        resolve_proxy_kwargs(ProxySettings())
+
+        log_text = " ".join(str(a) for a in mock_log.call_args.args)
+        assert "ALL_PROXY=http://proxy:3128" in log_text
+
     def test_empty_env_var_not_used(self, monkeypatch):
         monkeypatch.setenv("ALL_PROXY", "")
         with pytest.raises(ProxyConfigError):
