@@ -20,6 +20,7 @@ from src.email_server import (
     _verify_svix,
     serve,
 )
+from src.geoblock import GeoblockError
 from src.main import PipelineResult
 
 WSEC = "whsec_a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0=="
@@ -569,6 +570,25 @@ class TestProcessInbound:
             "An error occurred during processing"
             in mocks["send_reply"].call_args.kwargs["body"]
         )
+
+    async def test_sends_geoblock_error_reply(self, mocker):
+        mocks = self._setup_mocks(
+            mocker,
+            fetch_email_return={"text": "body"},
+            fetch_attach_return=[],
+            build_settings_return=_make_cfg(),
+            main_side_effect=GeoblockError("Request blocked: ..."),
+        )
+        cfg = _make_cfg({"sender_whitelist_enabled": False})
+        await _process_inbound(
+            email_id="e1",
+            sender="u@x.com",
+            subject="Hi",
+            message_id="mid",
+            cfg=cfg,
+        )
+        mocks["send_reply"].assert_called_once()
+        assert "Request blocked" in mocks["send_reply"].call_args.kwargs["body"]
 
     async def test_sends_error_reply_when_main_returns_none(self, mocker):
         mocks = self._setup_mocks(

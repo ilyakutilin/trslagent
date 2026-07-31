@@ -8,7 +8,10 @@ from collections.abc import Coroutine
 from pathlib import Path
 from typing import Any, TypeVar
 
+from pydantic import ValidationError
+
 from src.config import get_settings, logger
+from src.geoblock import GeoblockError
 from src.http_client import ProxyConfigError
 from src.main import export_glossary_matches, main
 
@@ -55,12 +58,14 @@ def _parse_glossary_args(args: list[str]) -> tuple[bool, Path | None, list[str]]
 
 
 def _run_or_exit(awaitable: Coroutine[Any, Any, T]) -> T:
-    """Run an awaitable and exit gracefully on proxy configuration errors.
+    """Run an awaitable and exit gracefully on proxy or geoblock errors.
 
     Executes *awaitable* via ``asyncio.run``. When the proxy is enabled
     but no proxy settings and no proxy environment variables are
     available, ``ProxyConfigError`` is raised deep inside the pipeline
-    (e.g. at client construction); instead of leaking a raw traceback to
+    (e.g. at client construction); when the outgoing IP is in a blocked
+    country or its geography cannot be verified, ``GeoblockError`` is
+    raised by the geoblock check. Instead of leaking a raw traceback to
     the user, the error is logged and the process exits with status 1.
 
     Args:
@@ -70,13 +75,16 @@ def _run_or_exit(awaitable: Coroutine[Any, Any, T]) -> T:
         The coroutine's return value.
 
     Raises:
-        SystemExit: With status 1 when ``ProxyConfigError`` is raised
-            while running *awaitable*.
+        SystemExit: With status 1 when ``ProxyConfigError`` or
+            ``GeoblockError`` is raised while running *awaitable*.
     """
     try:
         return asyncio.run(awaitable)
     except ProxyConfigError as e:
         logger.error("Proxy configuration error: {}", e)
+        sys.exit(1)
+    except GeoblockError as e:
+        logger.error("Geoblock check failed: {}", e)
         sys.exit(1)
 
 
@@ -102,7 +110,11 @@ def cli() -> None:
 
         from src.email_server import serve
 
-        settings = get_settings(toml_path=toml_path)
+        try:
+            settings = get_settings(toml_path=toml_path)
+        except ValidationError as e:
+            logger.error("Invalid configuration: {}", e)
+            sys.exit(1)
         _run_or_exit(serve(cfg=settings))
         return
 
@@ -115,7 +127,11 @@ def cli() -> None:
     if not toml_path.is_file():
         sys.exit(f"Config file not found: {toml_path}")
 
-    settings = get_settings(toml_path=toml_path)
+    try:
+        settings = get_settings(toml_path=toml_path)
+    except ValidationError as e:
+        logger.error("Invalid configuration: {}", e)
+        sys.exit(1)
 
     if match_glossary:
         result = export_glossary_matches(cfg=settings)

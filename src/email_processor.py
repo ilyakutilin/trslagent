@@ -287,6 +287,11 @@ def build_settings_from_email(
     directly, bypassing file reads. If no ``source.txt`` is provided, the
     plain-text email body is used as the source text.
 
+    When an attached ``config.toml`` is used, the server's geoblock
+    countries (``default_cfg.geoblock.countries``) are merged into the
+    per-request settings before returning: the server policy is a floor
+    and can only be extended, never removed by an email request.
+
     If the email body starts with ``@match-glossary`` (case-insensitive)
     as the first non-empty line, that line is stripped and
     ``match_glossary_only`` is set on ``InputData``, triggering
@@ -364,6 +369,17 @@ def build_settings_from_email(
             settings.input_data.ref_target_text = ref_target_text
 
         settings.input_data.match_glossary_only = match_glossary_only
+
+        server_countries = list(default_cfg.geoblock.countries)
+        email_countries = list(settings.geoblock.countries)
+        if server_countries:
+            settings.geoblock.countries = server_countries + [
+                c for c in email_countries if c not in server_countries
+            ]
+            logger.info(
+                "Merged server geoblock countries into email request: {}",
+                ", ".join(settings.geoblock.countries),
+            )
 
         return settings
 

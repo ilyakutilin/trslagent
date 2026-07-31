@@ -12,6 +12,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Any, ClassVar, Literal, Self, Type
 
+from iso3166 import countries
 from iso639 import Lang
 from iso639.exceptions import InvalidLanguageValue
 from loguru import logger
@@ -22,6 +23,7 @@ from pydantic import (
     Field,
     PlainSerializer,
     SecretStr,
+    field_validator,
     model_validator,
 )
 from pydantic.fields import FieldInfo
@@ -193,6 +195,35 @@ class EmailSettings(BaseModel):
     )
 
 
+class GeoblockSettings(BaseSettings):
+    """Geoblocking settings controlling outgoing-IP country verification."""
+
+    countries: list[str] = Field(
+        default_factory=list,
+        description=(
+            "ISO 3166 country codes (alpha2, alpha3, numeric) or full names "
+            "to block requests from. Empty list disables geoblocking."
+        ),
+    )
+
+    @field_validator("countries", mode="after")
+    @classmethod
+    def _validate_countries(cls, v: list[str]) -> list[str]:
+        """Normalize configured country identifiers to canonical alpha2 codes.
+
+        Args:
+            v: Raw country identifiers from configuration.
+
+        Returns:
+            Canonical uppercase alpha2 codes, deduplicated while preserving
+            order.
+
+        Raises:
+            ValueError: If any value is not a recognized country.
+        """
+        return parse_geoblock_countries(v)
+
+
 def parse_lang(v: Any) -> Lang:
     """Parse a string or Lang instance into a validated Lang object.
 
@@ -217,6 +248,45 @@ def parse_lang(v: Any) -> Lang:
         f"Object {v} is of a wrong class {v.__class__.__name__} "
         "while only str and Lang are supported"
     )
+
+
+def parse_geoblock_countries(values: list[str]) -> list[str]:
+    """Validate country identifiers and normalize them to canonical alpha2 codes.
+
+    Each value is resolved via ``iso3166.countries.get()``, which accepts
+    ISO 3166 alpha2, alpha3, and numeric codes as well as full English
+    country names, case-insensitively. Unrecognized values raise a
+    ``ValueError`` listing all of them.
+
+    Args:
+        values: Raw country identifiers from configuration.
+
+    Returns:
+        Canonical uppercase alpha2 codes, deduplicated while preserving
+        order.
+
+    Raises:
+        ValueError: If any value is not a recognized country.
+    """
+    normalized: list[str] = []
+    seen: set[str] = set()
+    unknown: list[str] = []
+    for value in values:
+        try:
+            country = countries.get(value)
+        except KeyError:
+            unknown.append(value)
+            continue
+        alpha2 = country.alpha2
+        if alpha2 not in seen:
+            seen.add(alpha2)
+            normalized.append(alpha2)
+    if unknown:
+        raise ValueError(
+            "Unknown country in geoblock.countries: "
+            + ", ".join(repr(v) for v in unknown)
+        )
+    return normalized
 
 
 LangField = Annotated[
@@ -509,6 +579,7 @@ class Settings(BaseSettings):
     llm: LLMSettings = Field(default_factory=LLMSettings)
     cost: CostSettings = Field(default_factory=CostSettings)
     proxy: ProxySettings = Field(default_factory=ProxySettings)
+    geoblock: GeoblockSettings = Field(default_factory=GeoblockSettings)
     chunk: ChunkSettings = Field(default_factory=ChunkSettings)
     glossary: GlossarySettings = Field(default_factory=GlossarySettings)
     log: LogSettings = Field(default_factory=LogSettings)

@@ -50,3 +50,8 @@ source_file_path = "files/source.txt"
 # port = 1080
 # username = ""
 # NOTE: proxy password is a secret — set it via PROXY__PASSWORD in .env only, never in TOML
+
+[geoblock]
+# Block requests from these countries (ISO 3166 alpha2 / alpha3 / numeric codes or full names).
+# Unrecognized values fail config validation and exit with code 1. Empty list disables geoblocking.
+# countries = ["RU", "BY"]

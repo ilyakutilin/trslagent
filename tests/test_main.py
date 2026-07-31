@@ -6,11 +6,13 @@ from pydantic import SecretStr
 
 from src.config import (
     ChunkSettings,
+    GeoblockSettings,
     InputData,
     LLMSettings,
     OutputData,
     Settings,
 )
+from src.geoblock import GeoblockError
 from src.glossary.models import GlossaryEntry, Term
 from src.main import export_glossary_matches, main
 
@@ -696,3 +698,145 @@ class TestAutoDetectReview:
         assert result.text == "Review OK"
         assert cfg.input_data.source_lang == Lang("en")
         assert cfg.input_data.target_lang == Lang("ru")
+
+
+class TestGeoblock:
+    @pytest.mark.asyncio
+    async def test_not_called_when_countries_empty(self, mocker):
+        mock_verify = mocker.patch(
+            "src.main.verify_ip_not_geoblocked", new_callable=AsyncMock
+        )
+        mocker.patch(
+            "src.main.prepare_glossary_context",
+            return_value=mocker.MagicMock(
+                user_entries=[],
+                select_for_chunk=lambda chunk, mt: ([], [], "", ""),
+            ),
+        )
+
+        mock_llm = AsyncMock()
+        mock_llm.get_reply_async.return_value = ("Перевод", "completion-1")
+        mocker.patch("src.main.LLM", return_value=mock_llm)
+
+        cfg = Settings(
+            llm=LLMSettings(api_key=SecretStr("test-key")),
+            input_data=InputData(
+                source_lang=Lang("en"),
+                target_lang=Lang("ru"),
+                source_text="Hello world.",
+            ),
+            chunk=ChunkSettings(size=1000, max_concurrent=1, delay_seconds=0),
+        )
+
+        result = await main(cfg)
+        assert result is not None
+        mock_verify.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_called_with_blocked_countries_and_proxy_settings(self, mocker):
+        mock_verify = mocker.patch(
+            "src.main.verify_ip_not_geoblocked", new_callable=AsyncMock
+        )
+        mocker.patch(
+            "src.main.prepare_glossary_context",
+            return_value=mocker.MagicMock(
+                user_entries=[],
+                select_for_chunk=lambda chunk, mt: ([], [], "", ""),
+            ),
+        )
+
+        mock_llm = AsyncMock()
+        mock_llm.get_reply_async.return_value = ("Перевод", "completion-1")
+        mocker.patch("src.main.LLM", return_value=mock_llm)
+
+        cfg = Settings(
+            llm=LLMSettings(api_key=SecretStr("test-key")),
+            input_data=InputData(
+                source_lang=Lang("en"),
+                target_lang=Lang("ru"),
+                source_text="Hello world.",
+            ),
+            chunk=ChunkSettings(size=1000, max_concurrent=1, delay_seconds=0),
+            geoblock=GeoblockSettings(countries=["RU"]),
+        )
+
+        result = await main(cfg)
+        assert result is not None
+        mock_verify.assert_awaited_once()
+        assert mock_verify.call_args.args[0] == ["RU"]
+        assert mock_verify.call_args.kwargs["proxy_settings"] is cfg.proxy
+
+    @pytest.mark.asyncio
+    async def test_not_called_when_print_prompt_only(self, mocker):
+        mock_verify = mocker.patch(
+            "src.main.verify_ip_not_geoblocked", new_callable=AsyncMock
+        )
+        mocker.patch(
+            "src.main.prepare_glossary_context",
+            return_value=mocker.MagicMock(
+                user_entries=[],
+                select_for_chunk=lambda chunk, mt: ([], [], "", ""),
+            ),
+        )
+
+        cfg = Settings(
+            input_data=InputData(
+                source_lang=Lang("en"),
+                target_lang=Lang("ru"),
+                source_text="Hello world.",
+            ),
+            output_data=OutputData(print_prompt_only=True),
+            geoblock=GeoblockSettings(countries=["RU"]),
+        )
+
+        result = await main(cfg)
+        assert result is None
+        mock_verify.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_geoblock_error_propagates(self, mocker):
+        mocker.patch(
+            "src.main.verify_ip_not_geoblocked",
+            new_callable=AsyncMock,
+            side_effect=GeoblockError("blocked country RU"),
+        )
+
+        cfg = Settings(
+            llm=LLMSettings(api_key=SecretStr("test-key")),
+            input_data=InputData(
+                source_lang=Lang("en"),
+                target_lang=Lang("ru"),
+                source_text="Hello world.",
+            ),
+            chunk=ChunkSettings(size=1000, max_concurrent=1, delay_seconds=0),
+            geoblock=GeoblockSettings(countries=["RU"]),
+        )
+
+        with pytest.raises(GeoblockError, match="blocked country RU"):
+            await main(cfg)
+
+    @pytest.mark.asyncio
+    async def test_geoblock_check_runs_before_llm_construction(self, mocker):
+        mock_verify = mocker.patch(
+            "src.main.verify_ip_not_geoblocked",
+            new_callable=AsyncMock,
+            side_effect=GeoblockError("Request blocked"),
+        )
+        mock_llm_class = mocker.patch("src.main.LLM")
+
+        cfg = Settings(
+            llm=LLMSettings(api_key=SecretStr("test-key")),
+            input_data=InputData(
+                source_lang=Lang("en"),
+                target_lang=Lang("ru"),
+                source_text="Hello world.",
+            ),
+            chunk=ChunkSettings(size=1000, max_concurrent=1, delay_seconds=0),
+            geoblock=GeoblockSettings(countries=["RU"]),
+        )
+
+        with pytest.raises(GeoblockError, match="Request blocked"):
+            await main(cfg)
+
+        mock_verify.assert_awaited_once()
+        mock_llm_class.assert_not_called()

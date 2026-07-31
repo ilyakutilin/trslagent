@@ -27,13 +27,14 @@ def _clear_proxy_env(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_dotenv(monkeypatch):
-    """Prevent the developer's .env file and cost env vars from leaking
-    into tests.
+    """Prevent the developer's .env file and cost/geoblock env vars from
+    leaking into tests.
 
     Disables the .env source for ``Settings`` (and thus any real network
     behavior it could inject, e.g. ``COST__GENERATION_INFO_URL``) and
-    clears the ``COST__*`` env vars. Tests that need env-file behavior
-    override ``Settings.model_config`` explicitly.
+    clears the ``COST__*`` env vars and ``GEOBLOCK__COUNTRIES``. Tests
+    that need env-file behavior override ``Settings.model_config``
+    explicitly.
     """
     from src.config import Settings
 
@@ -46,6 +47,7 @@ def _no_dotenv(monkeypatch):
         "COST__GENERATION_INFO_URL",
         "COST__COST_KEY",
         "COST__COST_CURRENCY",
+        "GEOBLOCK__COUNTRIES",
     ):
         monkeypatch.delenv(name, raising=False)
 

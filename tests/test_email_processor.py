@@ -8,7 +8,13 @@ import respx
 from iso639 import Lang
 from pydantic import SecretStr
 
-from src.config import EmailSettings, InputData, ProxySettings, Settings
+from src.config import (
+    EmailSettings,
+    GeoblockSettings,
+    InputData,
+    ProxySettings,
+    Settings,
+)
 from src.email_processor import (
     MAX_INDIVIDUAL_ATTACHMENT,
     RESEND_API_BASE,
@@ -474,6 +480,57 @@ class TestBuildSettingsFromEmail:
             default_cfg=cfg,
         )
         assert result.input_data.source_text == "Fallback body"
+
+    def test_server_geoblock_preserved_when_attached_config_has_no_geoblock(
+        self,
+    ):
+        cfg = _make_default_settings()
+        cfg.geoblock = GeoblockSettings(countries=["RU"])
+        config_toml = "[input_data]\n" + SRC_TRG_TOML
+        result = build_settings_from_email(
+            attachment_bodies={"config.toml": config_toml.encode("utf-8")},
+            email_body="body",
+            default_cfg=cfg,
+        )
+        assert result.geoblock.countries == ["RU"]
+
+    def test_server_geoblock_merged_with_attached_config_geoblock(self):
+        cfg = _make_default_settings()
+        cfg.geoblock = GeoblockSettings(countries=["RU"])
+        config_toml = (
+            "[input_data]\n" + SRC_TRG_TOML + '[geoblock]\ncountries = ["US", "BY"]\n'
+        )
+        result = build_settings_from_email(
+            attachment_bodies={"config.toml": config_toml.encode("utf-8")},
+            email_body="body",
+            default_cfg=cfg,
+        )
+        assert result.geoblock.countries == ["RU", "US", "BY"]
+
+    def test_attached_config_geoblock_kept_when_server_geoblock_empty(self):
+        cfg = _make_default_settings()
+        config_toml = (
+            "[input_data]\n" + SRC_TRG_TOML + '[geoblock]\ncountries = ["US"]\n'
+        )
+        result = build_settings_from_email(
+            attachment_bodies={"config.toml": config_toml.encode("utf-8")},
+            email_body="body",
+            default_cfg=cfg,
+        )
+        assert result.geoblock.countries == ["US"]
+
+    def test_attached_config_geoblock_deduplicated_against_server(self):
+        cfg = _make_default_settings()
+        cfg.geoblock = GeoblockSettings(countries=["RU"])
+        config_toml = (
+            "[input_data]\n" + SRC_TRG_TOML + '[geoblock]\ncountries = ["RU", "US"]\n'
+        )
+        result = build_settings_from_email(
+            attachment_bodies={"config.toml": config_toml.encode("utf-8")},
+            email_body="body",
+            default_cfg=cfg,
+        )
+        assert result.geoblock.countries == ["RU", "US"]
 
     def test_config_toml_with_source_txt_ignores_email_body(self):
         cfg = _make_default_settings()

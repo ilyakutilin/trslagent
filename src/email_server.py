@@ -22,6 +22,7 @@ from src.email_processor import (
     fetch_email_content,
     send_reply,
 )
+from src.geoblock import GeoblockError
 from src.http_client import create_client
 from src.main import export_glossary_matches, main
 from src.pipeline.result import PipelineResult
@@ -396,6 +397,19 @@ async def _process_inbound(
 
     try:
         result = await main(cfg=translation_settings)
+    except GeoblockError as e:
+        logger.error("Geoblock check failed: {}", e)
+        await _send_error_reply(
+            sender=sender,
+            subject=subject,
+            message_id=message_id,
+            email_settings=email_settings,
+            api_key=api_key,
+            detail=str(e),
+            client=client,
+            proxy_settings=proxy_settings,
+        )
+        return
     except Exception:
         logger.exception("Translation/review failed")
         await _send_error_reply(

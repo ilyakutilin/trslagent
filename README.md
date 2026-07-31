@@ -133,6 +133,7 @@ All sections and their keys:
 |               | `port`                        | `1080`                                  | Proxy port (1–65535)                                  |
 |               | `username`                    | —                                       | Proxy username (optional)                             |
 |               | `password`                    | from `.env`                             | Proxy password (secret — env only, never TOML)        |
+| `geoblock`   | `countries`                    | `[]`                                    | Countries to block requests from (ISO 3166 alpha2/alpha3/numeric codes or full names) |
 | `email`       | `resend_api_key`               | from `.env`                             | Resend API key for sending/receiving emails            |
 |               | `resend_webhook_secret`        | from `.env`                             | Resend webhook signing secret (`whsec_...`)            |
 |               | `from_address`                 | `"Translation Agent <trsl@resend.dev>"` | From address for reply emails                          |
@@ -173,6 +174,7 @@ PROXY__HOST=127.0.0.1
 PROXY__PORT=1080
 PROXY__USERNAME=             # optional
 PROXY__PASSWORD=             # secret — env only, never in TOML
+GEOBLOCK__COUNTRIES=["RU", "BY"]   # JSON list of countries to block; empty list disables
 LOG__LEVEL=INFO
 ```
 
@@ -180,7 +182,7 @@ Note: `LLM__API_KEY` is stored as a `SecretStr` and must be set in `.env` or as 
 
 ### Proxy
 
-All outbound HTTP traffic (LLM calls, cost lookup, Resend email API) goes through `src/http_client.py:create_client`, which resolves proxy settings from the `[proxy]` section (`PROXY__*` env vars):
+All outbound HTTP traffic (LLM calls, cost lookup, Resend email API, geoblock IP-geo checks) goes through `src/http_client.py:create_client`, which resolves proxy settings from the `[proxy]` section (`PROXY__*` env vars):
 
 - **Master switch** — `enabled` (default `true`). When `false`, all requests go direct and proxy env vars (`ALL_PROXY`, `HTTPS_PROXY`, `HTTP_PROXY`) are ignored.
 - **Explicit config** — set `protocol` (one of `http`, `https`, `socks5`, `socks5h`, `socks4`, `socks4a`) plus `host`/`port`/`username` to build `protocol://[user:pass@]host:port`; this takes precedence over env vars.
@@ -188,6 +190,25 @@ All outbound HTTP traffic (LLM calls, cost lookup, Resend email API) goes throug
 - **Fail-fast** — proxy enabled with no `protocol` and none of those env vars set → an error is raised (deliberate). The message points to the `[proxy]`/`PROXY__*` settings, the env vars, or `PROXY__ENABLED=false`. In CLI mode the error is logged and the process exits with code 1 instead of dumping a traceback.
 - **Password** — `password` is a secret: set it via `PROXY__PASSWORD` in `.env` only, never in TOML.
 - **SOCKS** — `socks5`/`socks5h`/`socks4`/`socks4a` require the `socksio` package (installed via `httpx[socks]`).
+
+### Geoblocking
+
+Optionally block requests whose outgoing IP is located in one of the configured countries. The outgoing IP is the one the LLM provider would see — i.e. the **proxied IP** when a proxy is configured, since the geo checks run through the same proxy resolution as the LLM (`src/http_client.py:create_client`).
+
+Enable it in TOML:
+
+```toml
+[geoblock]
+countries = ["RU", "BY"]
+```
+
+Or via env: `GEOBLOCK__COUNTRIES=["RU","BY"]` (JSON list).
+
+- **Accepted values** — ISO 3166 alpha2 (`"US"`), alpha3 (`"USA"`), numeric (`"840"`) codes, or full English names (must match the `iso3166` package's names, e.g. `"Russian Federation"`); case-insensitive. Values are validated at config load via the `iso3166` package and normalized to canonical alpha2 codes; unrecognized values fail configuration (`Invalid configuration: ...`) and exit with code 1 — both for one-shot runs and `serve-emails` startup.
+- **Checkers** — three free, keyless IP-geo services are queried **concurrently**: `ip-api.com` (`http://ip-api.com/json/`, HTTP-only on the free tier), `ipinfo.io`, and `api.country.is`. Each request has a 5-second timeout.
+- **Fail-closed decision** — if any checker reports a blocked country, the request is blocked. Otherwise the request proceeds only if **at least 2 of 3** checkers confirm a country that is NOT in the blocked list (one checker may fail or time out). Fewer than 2 clean confirmations block the request ("unable to verify").
+- **Request cycle** — the check runs once per `main()` invocation: once per CLI launch (translation or review) and once per processed inbound email. It is skipped for `--match-glossary` and `print_prompt_only` (no LLM calls). In the email flow, the server's `geoblock.countries` are merged with any `[geoblock]` section in an attached `config.toml`, so the server policy can only be extended, never removed.
+- **On block** — the CLI logs `Geoblock check failed: ...` and exits with code 1; a blocked email request receives a threaded error reply describing the reason.
 
 ## Usage
 

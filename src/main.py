@@ -1,6 +1,7 @@
 """Pipeline facade: dispatches to translation/review pipelines and exports glossary matches."""
 
 from src.config import Settings, logger
+from src.geoblock import verify_ip_not_geoblocked
 from src.glossary.dedup import deduplicate_user_auto
 from src.glossary.stringify import stringify_entries
 from src.http_client import create_client
@@ -22,7 +23,10 @@ async def main(cfg: Settings) -> PipelineResult | None:
     and closed when the pipeline finishes. The LLM client is closed in a
     finally block, so resources are released even when the pipeline fails.
     Proxy settings from ``cfg.proxy`` are threaded to both the HTTP client
-    and the LLM.
+    and the LLM. When geoblocking is enabled (``cfg.geoblock.countries`` is
+    non-empty) and the run is not in print_prompt_only mode, the outgoing
+    IP (the proxied IP when a proxy is configured) is verified against the
+    blocked countries before any LLM call.
 
     Args:
         cfg: Application settings controlling all pipeline behavior.
@@ -33,6 +37,8 @@ async def main(cfg: Settings) -> PipelineResult | None:
 
     Raises:
         ValueError: If source text is empty.
+        GeoblockError: If the outgoing IP is in a blocked country or its
+            geography cannot be verified (when geoblocking is enabled).
     """
     resolve_languages(cfg)
     assert cfg.input_data.source_lang is not None
@@ -44,6 +50,9 @@ async def main(cfg: Settings) -> PipelineResult | None:
             "Provide it via source_file_path, source_text, or set it "
             "programmatically before calling main()."
         )
+
+    if cfg.geoblock.countries and not cfg.output_data.print_prompt_only:
+        await verify_ip_not_geoblocked(cfg.geoblock.countries, proxy_settings=cfg.proxy)
 
     ctx = prepare_glossary_context(cfg)
 

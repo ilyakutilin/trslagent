@@ -6,6 +6,7 @@ from iso639 import Lang
 from pydantic import ValidationError
 from src.config import (
     ChunkSettings,
+    GeoblockSettings,
     InputData,
     LLMSettings,
     LogSettings,
@@ -458,3 +459,34 @@ class TestProxySettings:
         assert settings.proxy.protocol == "http"
         assert settings.proxy.host == "10.0.0.1"
         assert settings.proxy.port == 8888
+
+
+class TestGeoblockSettings:
+    def test_defaults(self):
+        s = Settings()
+        assert s.geoblock.countries == []
+        assert GeoblockSettings().countries == []
+
+    def test_env_vars_override_geoblock_settings(self, monkeypatch):
+        monkeypatch.setenv("GEOBLOCK__COUNTRIES", '["ru", "BY", "643"]')
+        s = Settings()
+        assert s.geoblock.countries == ["RU", "BY"]
+
+    def test_get_settings_reads_geoblock_section(self, tmp_path, reset_toml_path):
+        source_fp = tmp_path / "source.txt"
+        source_fp.write_text("dummy")
+        toml_path = tmp_path / "config.toml"
+        toml_path.write_text(
+            "[geoblock]\n"
+            'countries = ["US", "RUS"]\n'
+            "[input_data]\n"
+            f'source_file_path = "{source_fp}"\n'
+        )
+        settings = get_settings(toml_path)
+        assert settings.geoblock.countries == ["US", "RU"]
+
+    def test_invalid_country_raises(self):
+        with pytest.raises(ValidationError):
+            GeoblockSettings(countries=["zzz"])
+        with pytest.raises(ValidationError):
+            Settings(geoblock=GeoblockSettings(countries=["NotACountry"]))
