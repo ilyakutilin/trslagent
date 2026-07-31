@@ -66,7 +66,6 @@ class TestTranslationPipeline:
                 select_for_chunk=lambda chunk, mt: ([], [], "", ""),
             ),
         )
-        mocker.patch("src.llm.resolve_and_log_cost")
 
         mock_llm = AsyncMock()
         mock_llm.get_reply_async.return_value = ("Переведённый текст", "completion-1")
@@ -99,7 +98,6 @@ class TestTranslationPipeline:
                 select_for_chunk=lambda chunk, mt: ([], [], "", ""),
             ),
         )
-        mocker.patch("src.llm.resolve_and_log_cost")
 
         mock_llm = AsyncMock()
         mock_llm.get_reply_async.return_value = ("Перевод", "completion-1")
@@ -129,7 +127,6 @@ class TestTranslationPipeline:
                 select_for_chunk=lambda chunk, mt: ([], [], "", ""),
             ),
         )
-        mocker.patch("src.llm.resolve_and_log_cost")
 
         mock_llm = AsyncMock()
         mock_llm.get_reply_async.side_effect = [
@@ -165,7 +162,6 @@ class TestReviewMode:
                 select_for_chunk=lambda chunk, mt: ([], [], "", ""),
             ),
         )
-        mocker.patch("src.llm.resolve_and_log_cost")
 
         mock_llm = AsyncMock()
         mock_llm.get_reply_async.return_value = ("Review result", "id-1")
@@ -194,7 +190,6 @@ class TestReviewMode:
                 select_for_chunk=lambda chunk, mt: ([], [], "", ""),
             ),
         )
-        mocker.patch("src.llm.resolve_and_log_cost")
 
         mock_llm = AsyncMock()
         mock_llm.get_reply_async.side_effect = [
@@ -286,7 +281,6 @@ class TestChunkFailure:
                 select_for_chunk=lambda chunk, mt: ([], [], "", ""),
             ),
         )
-        mocker.patch("src.llm.resolve_and_log_cost")
 
         mock_llm = AsyncMock()
         mock_llm.get_reply_async.side_effect = [
@@ -464,7 +458,6 @@ class TestPipelineResult:
             "src.main.prepare_glossary_context",
             return_value=ctx_mock,
         )
-        mocker.patch("src.llm.resolve_and_log_cost")
 
         mock_llm = AsyncMock()
         mock_llm.get_reply_async.return_value = ("Перевод", "completion-1")
@@ -495,7 +488,6 @@ class TestPipelineResult:
                 select_for_chunk=lambda chunk, mt: ([], [], "", ""),
             ),
         )
-        mocker.patch("src.llm.resolve_and_log_cost")
 
         mock_llm = AsyncMock()
         mock_llm.get_reply_async.return_value = ("Review result", "id-1")
@@ -527,7 +519,6 @@ class TestPipelineResult:
                 select_for_chunk=lambda chunk, mt: ([], [], "", ""),
             ),
         )
-        mocker.patch("src.llm.resolve_and_log_cost")
 
         mock_llm = AsyncMock()
         mock_llm.get_reply_async.return_value = ("Перевод", "completion-1")
@@ -557,7 +548,6 @@ class TestPipelineResult:
                 select_for_chunk=lambda chunk, mt: ([], [], "", ""),
             ),
         )
-        mocker.patch("src.llm.resolve_and_log_cost")
 
         mock_llm = AsyncMock()
         mock_llm.get_reply_async.return_value = ("Перевод", "completion-1")
@@ -614,7 +604,6 @@ class TestAutoDetectTranslation:
                 select_for_chunk=lambda chunk, mt: ([], [], "", ""),
             ),
         )
-        mocker.patch("src.llm.resolve_and_log_cost")
 
         mock_llm = AsyncMock()
         mock_llm.get_reply_async.return_value = ("Перевод", "completion-1")
@@ -648,7 +637,6 @@ class TestAutoDetectTranslation:
                 select_for_chunk=lambda chunk, mt: ([], [], "", ""),
             ),
         )
-        mocker.patch("src.llm.resolve_and_log_cost")
 
         mock_llm = AsyncMock()
         mock_llm.get_reply_async.return_value = ("Traducción", "completion-1")
@@ -682,7 +670,6 @@ class TestAutoDetectReview:
                 select_for_chunk=lambda chunk, mt: ([], [], "", ""),
             ),
         )
-        mocker.patch("src.llm.resolve_and_log_cost")
 
         mock_llm = AsyncMock()
         mock_llm.get_reply_async.return_value = ("Review OK", "id-1")
