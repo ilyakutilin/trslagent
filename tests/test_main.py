@@ -305,6 +305,51 @@ class TestChunkFailure:
         assert success_count == 2
 
 
+class TestPipelineLifecycle:
+    @pytest.mark.asyncio
+    async def test_llm_closed_and_http_client_threaded_to_pipeline(self, mocker):
+        mocker.patch(
+            "src.main.prepare_glossary_context",
+            return_value=mocker.MagicMock(),
+        )
+
+        mock_llm = AsyncMock()
+        mock_llm.api_key = "test-key"
+        mock_llm.get_reply_async.return_value = ("Перевод", "completion-1")
+        mocker.patch("src.main.LLM", return_value=mock_llm)
+
+        mock_pipeline = mocker.patch(
+            "src.main.run_translation_pipeline", new_callable=AsyncMock
+        )
+        mock_pipeline.return_value = mocker.MagicMock()
+
+        mock_client = AsyncMock()
+        mock_client.__aenter__.return_value = mock_client
+        mock_create_client = mocker.patch(
+            "src.main.create_client", return_value=mock_client
+        )
+
+        cfg = Settings(
+            llm=LLMSettings(api_key=SecretStr("test-key")),
+            input_data=InputData(
+                source_lang=Lang("en"),
+                target_lang=Lang("ru"),
+                source_text="Hello world.",
+            ),
+            chunk=ChunkSettings(size=1000, max_concurrent=1, delay_seconds=0),
+        )
+
+        result = await main(cfg)
+
+        assert result is not None
+        mock_create_client.assert_called_once_with()
+        mock_client.__aenter__.assert_awaited_once()
+        mock_client.__aexit__.assert_awaited_once()
+        mock_pipeline.assert_awaited_once()
+        assert mock_pipeline.await_args.args[3] is mock_client
+        mock_llm.close.assert_awaited_once()
+
+
 class TestExportGlossaryMatches:
     def test_text_matched_against_auto_glossary(
         self, mocker, en_lang: Lang, ru_lang: Lang

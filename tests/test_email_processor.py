@@ -19,6 +19,7 @@ from src.email_processor import (
     fetch_email_content,
     send_reply,
 )
+from src.http_client import create_client
 
 SRC_TRG_TOML = 'source_lang = "en"\ntarget_lang = "ru"\n'
 
@@ -94,6 +95,19 @@ class TestFetchEmailContent:
         await fetch_email_content("email-1", "secret-key")
         assert route.called
 
+    @respx.mock
+    async def test_injected_client_is_not_closed(self):
+        respx.get(f"{RESEND_EMAILS_RECEIVING_BASE}/email-1").mock(
+            return_value=httpx.Response(200, json={"text": "Hello"})
+        )
+        client = create_client()
+        try:
+            result = await fetch_email_content("email-1", "key", client=client)
+            assert result == {"text": "Hello"}
+            assert not client.is_closed
+        finally:
+            await client.aclose()
+
 
 class TestFetchAttachments:
     @respx.mock
@@ -149,6 +163,21 @@ class TestDownloadAttachment:
         )
         with pytest.raises(httpx.HTTPStatusError):
             await download_attachment("https://storage.example.com/err.bin")
+
+    @respx.mock
+    async def test_injected_client_is_not_closed(self):
+        respx.get("https://storage.example.com/file.bin").mock(
+            return_value=httpx.Response(200, content=b"hello world")
+        )
+        client = create_client()
+        try:
+            result = await download_attachment(
+                "https://storage.example.com/file.bin", client=client
+            )
+            assert result == b"hello world"
+            assert not client.is_closed
+        finally:
+            await client.aclose()
 
 
 class TestSendReply:

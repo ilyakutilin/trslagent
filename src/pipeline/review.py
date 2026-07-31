@@ -1,5 +1,7 @@
 """Review pipeline orchestration."""
 
+import httpx
+
 from src.config import Settings, logger
 from src.llm import LLM, resolve_and_log_cost
 from src.pipeline.concurrency import gather_chunk_results
@@ -30,11 +32,20 @@ async def _run_review_divider(
     cfg: Settings,
     reviewer: Reviewer,
     llm: LLM | None,
+    http_client: httpx.AsyncClient | None = None,
 ) -> PipelineResult | None:
     """Run a divider-based chunked review pipeline.
 
     Splits source and target texts on the divider, asserts the chunk counts
     match, and processes pairs concurrently (or serially in prompt-print mode).
+
+    Args:
+        ctx: Prepared glossary context.
+        cfg: Application settings.
+        reviewer: Reviewer instance.
+        llm: LLM instance, or None for print-prompt-only mode.
+        http_client: Optional injected HTTP client used for cost fetches;
+            when None, resolve_and_log_cost falls back to creating its own.
     """
     assert cfg.input_data.source_lang is not None
     assert cfg.input_data.target_lang is not None
@@ -95,7 +106,7 @@ async def _run_review_divider(
     )
 
     cost_total, _, cost_unknowns = await resolve_and_log_cost(
-        completion_ids, llm.api_key, cfg
+        completion_ids, llm.api_key, cfg, client=http_client
     )
 
     return build_pipeline_result(
@@ -123,8 +134,18 @@ async def _run_review_full(
     cfg: Settings,
     reviewer: Reviewer,
     llm: LLM | None,
+    http_client: httpx.AsyncClient | None = None,
 ) -> PipelineResult | None:
-    """Run a non-chunked review pipeline over the full source/target texts."""
+    """Run a non-chunked review pipeline over the full source/target texts.
+
+    Args:
+        ctx: Prepared glossary context.
+        cfg: Application settings.
+        reviewer: Reviewer instance.
+        llm: LLM instance, or None for print-prompt-only mode.
+        http_client: Optional injected HTTP client used for cost fetches;
+            when None, resolve_and_log_cost falls back to creating its own.
+    """
     assert cfg.input_data.source_lang is not None
     assert cfg.input_data.target_lang is not None
 
@@ -155,7 +176,7 @@ async def _run_review_full(
     )
 
     cost_total, _, cost_unknowns = await resolve_and_log_cost(
-        completion_ids, cfg.llm.api_key.get_secret_value(), cfg
+        completion_ids, cfg.llm.api_key.get_secret_value(), cfg, client=http_client
     )
 
     return build_pipeline_result(
@@ -182,6 +203,7 @@ async def run_review_pipeline(
     ctx: GlossaryContext,
     cfg: Settings,
     llm: LLM | None,
+    http_client: httpx.AsyncClient | None = None,
 ) -> PipelineResult | None:
     """Run the review pipeline over a source/target pair.
 
@@ -192,6 +214,8 @@ async def run_review_pipeline(
         ctx: Prepared glossary context.
         cfg: Application settings.
         llm: LLM instance, or None for print-prompt-only mode.
+        http_client: Optional injected HTTP client used for cost fetches;
+            when None, resolve_and_log_cost falls back to creating its own.
 
     Returns:
         A PipelineResult with the stitched review and metadata, or None if
@@ -199,8 +223,8 @@ async def run_review_pipeline(
     """
     reviewer = _build_reviewer(cfg, llm)
     if cfg.chunk.divider:
-        return await _run_review_divider(ctx, cfg, reviewer, llm)
-    return await _run_review_full(ctx, cfg, reviewer, llm)
+        return await _run_review_divider(ctx, cfg, reviewer, llm, http_client)
+    return await _run_review_full(ctx, cfg, reviewer, llm, http_client)
 
 
 __all__ = ["run_review_pipeline"]

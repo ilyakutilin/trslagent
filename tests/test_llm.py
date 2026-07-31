@@ -1,5 +1,6 @@
 import json
 from typing import Any
+from unittest.mock import AsyncMock
 
 import httpx
 import pytest
@@ -7,6 +8,7 @@ import respx
 from iso639 import Lang
 
 from src.config import CostSettings, InputData, Settings
+from src.http_client import create_client
 from src.llm import LLM, _find_key, fetch_cost, resolve_and_log_cost
 
 
@@ -144,6 +146,25 @@ class TestFetchCost:
         assert "ConnectError" in warning_msg
         assert "Connection refused" in warning_msg
         assert "after 5 retries" in warning_msg
+
+    @pytest.mark.asyncio
+    async def test_injected_client_used_and_not_closed(
+        self, cost_settings: CostSettings, mocker
+    ):
+        mock_create = mocker.patch("src.llm.create_client")
+        url = f"{cost_settings.generation_info_url}?id=test-123"
+        client = create_client()
+        try:
+            with respx.mock() as mock:
+                mock.get(url).respond(json={"total_cost": 0.007})
+                result = await fetch_cost(
+                    "test-123", "fake-key", cost_settings, client=client
+                )
+            assert result == 0.007
+            assert not client.is_closed
+        finally:
+            await client.aclose()
+        mock_create.assert_not_called()
 
 
 def _make_completion_response(
@@ -383,6 +404,33 @@ class TestLLM:
         ):
             await llm.get_reply_async("system", "user")
 
+    @pytest.mark.asyncio
+    async def test_close_awaits_client_aclose_and_resets(self, llm: LLM):
+        mock_client = AsyncMock()
+        llm._client = mock_client
+
+        await llm.close()
+
+        mock_client.aclose.assert_awaited_once()
+        assert llm._client is None
+
+    @pytest.mark.asyncio
+    async def test_close_is_idempotent(self, llm: LLM):
+        mock_client = AsyncMock()
+        llm._client = mock_client
+
+        await llm.close()
+        await llm.close()
+
+        mock_client.aclose.assert_awaited_once()
+        assert llm._client is None
+
+    @pytest.mark.asyncio
+    async def test_close_is_noop_without_client(self, llm: LLM):
+        assert llm._client is None
+        await llm.close()
+        assert llm._client is None
+
 
 class TestResolveAndLogCost:
     @pytest.fixture(autouse=True)
@@ -406,8 +454,43 @@ class TestResolveAndLogCost:
 
         await resolve_and_log_cost(["id-1", "id-2"], "test-key", cfg)
         assert mock_fetch.call_count == 2
-        mock_fetch.assert_any_call("id-1", "test-key", cfg.cost)
-        mock_fetch.assert_any_call("id-2", "test-key", cfg.cost)
+        mock_fetch.assert_any_call("id-1", "test-key", cfg.cost, client=None)
+        mock_fetch.assert_any_call("id-2", "test-key", cfg.cost, client=None)
+
+    @pytest.mark.asyncio
+    async def test_forwards_injected_client_to_fetch_cost(self, mocker):
+        mock_fetch = mocker.patch("src.llm.fetch_cost", side_effect=[1.50, 2.50])
+        injected = AsyncMock()
+
+        cfg = Settings(
+            input_data=InputData(
+                source_lang=Lang("en"),
+                target_lang=Lang("ru"),
+                source_text="x",
+            ),
+            cost=CostSettings(generation_info_url="https://api.example.com/cost"),
+        )
+
+        await resolve_and_log_cost(["id-1", "id-2"], "test-key", cfg, client=injected)
+        assert mock_fetch.call_count == 2
+        mock_fetch.assert_any_call("id-1", "test-key", cfg.cost, client=injected)
+        mock_fetch.assert_any_call("id-2", "test-key", cfg.cost, client=injected)
+
+    @pytest.mark.asyncio
+    async def test_passes_client_none_when_not_injected(self, mocker):
+        mock_fetch = mocker.patch("src.llm.fetch_cost", side_effect=[1.50])
+
+        cfg = Settings(
+            input_data=InputData(
+                source_lang=Lang("en"),
+                target_lang=Lang("ru"),
+                source_text="x",
+            ),
+            cost=CostSettings(generation_info_url="https://api.example.com/cost"),
+        )
+
+        await resolve_and_log_cost(["id-1"], "test-key", cfg)
+        mock_fetch.assert_called_once_with("id-1", "test-key", cfg.cost, client=None)
 
     @pytest.mark.asyncio
     async def test_unknown_costs(self, mocker):

@@ -3,6 +3,7 @@
 from src.config import Settings, logger
 from src.glossary.dedup import deduplicate_user_auto
 from src.glossary.stringify import stringify_entries
+from src.http_client import create_client
 from src.language_detection import resolve_languages
 from src.llm import LLM
 from src.pipeline.glossary_context import prepare_glossary_context
@@ -17,6 +18,9 @@ async def main(cfg: Settings) -> PipelineResult | None:
     Determines the mode (translation or review) based on whether target_text
     is set, prepares the glossary context, constructs the LLM (if not in
     print_prompt_only mode), and dispatches to the appropriate pipeline.
+    A single short-lived HTTP client is created for the run's cost fetches
+    and closed when the pipeline finishes. The LLM client is closed in a
+    finally block, so resources are released even when the pipeline fails.
 
     Args:
         cfg: Application settings controlling all pipeline behavior.
@@ -51,9 +55,14 @@ async def main(cfg: Settings) -> PipelineResult | None:
             reasoning_effort=cfg.llm.reasoning_effort,
         )
 
-    if cfg.input_data.target_text:
-        return await run_review_pipeline(ctx, cfg, llm)
-    return await run_translation_pipeline(ctx, cfg, llm)
+    async with create_client() as http_client:
+        try:
+            if cfg.input_data.target_text:
+                return await run_review_pipeline(ctx, cfg, llm, http_client)
+            return await run_translation_pipeline(ctx, cfg, llm, http_client)
+        finally:
+            if llm is not None:
+                await llm.close()
 
 
 def export_glossary_matches(cfg: Settings) -> str:

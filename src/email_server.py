@@ -9,6 +9,8 @@ import base64
 import hashlib
 import hmac
 
+import httpx
+
 from aiohttp import web
 
 from src.config import Settings, logger
@@ -20,6 +22,7 @@ from src.email_processor import (
     fetch_email_content,
     send_reply,
 )
+from src.http_client import create_client
 from src.main import export_glossary_matches, main
 from src.pipeline.result import PipelineResult
 
@@ -161,7 +164,9 @@ def _build_info_block(result: PipelineResult) -> str:
     return "\n".join(lines)
 
 
-async def _handle_webhook(request: web.Request, cfg: Settings) -> web.Response:
+async def _handle_webhook(
+    request: web.Request, cfg: Settings, http_client: httpx.AsyncClient
+) -> web.Response:
     """Handle an inbound webhook POST request from Resend.
 
     Verifies the Svix signature, parses the JSON payload, filters by
@@ -170,6 +175,8 @@ async def _handle_webhook(request: web.Request, cfg: Settings) -> web.Response:
     Args:
         request: The aiohttp request object.
         cfg: Server configuration (Settings object).
+        http_client: Shared HTTP client reused across the Resend request
+            chain (content fetch, attachment download, reply sending).
 
     Returns:
         A ``web.Response`` with appropriate status code and message.
@@ -221,6 +228,7 @@ async def _handle_webhook(request: web.Request, cfg: Settings) -> web.Response:
             subject=subject,
             message_id=message_id,
             cfg=cfg,
+            client=http_client,
         )
     )
 
@@ -234,6 +242,7 @@ async def _process_inbound(
     subject: str,
     message_id: str,
     cfg: Settings,
+    client: httpx.AsyncClient | None = None,
 ) -> None:
     """Fetch and process an inbound email for translation, review, or glossary matching.
 
@@ -247,6 +256,9 @@ async def _process_inbound(
         subject: Email subject line.
         message_id: Original message Message-ID for threading replies.
         cfg: Server configuration (Settings object).
+        client: Optional shared HTTP client reused for all Resend API
+            calls. When None, each email_processor call creates and
+            closes its own short-lived client.
     """
     email_settings = cfg.email
     api_key = email_settings.resend_api_key.get_secret_value()
@@ -260,8 +272,8 @@ async def _process_inbound(
         return
 
     try:
-        email_content = await fetch_email_content(email_id, api_key)
-        raw_attachments = await fetch_attachments(email_id, api_key)
+        email_content = await fetch_email_content(email_id, api_key, client=client)
+        raw_attachments = await fetch_attachments(email_id, api_key, client=client)
 
         attachment_bodies: dict[str, bytes] = {}
         for att in raw_attachments:
@@ -270,7 +282,7 @@ async def _process_inbound(
             if not fname or not dl_url:
                 continue
             try:
-                content = await download_attachment(dl_url)
+                content = await download_attachment(dl_url, client=client)
                 attachment_bodies[fname] = content
             except ValueError as e:
                 await send_reply(
@@ -280,6 +292,7 @@ async def _process_inbound(
                     message_id=message_id,
                     from_address=email_settings.from_address,
                     api_key=api_key,
+                    client=client,
                 )
                 return
             except Exception:
@@ -297,6 +310,7 @@ async def _process_inbound(
                 message_id=message_id,
                 from_address=email_settings.from_address,
                 api_key=api_key,
+                client=client,
             )
         except Exception:
             logger.exception("Failed to send error reply to {}", sender)
@@ -317,6 +331,7 @@ async def _process_inbound(
             email_settings=email_settings,
             api_key=api_key,
             detail="Failed to parse the request. Please check your attachments and try again.",
+            client=client,
         )
         return
 
@@ -332,6 +347,7 @@ async def _process_inbound(
                 email_settings=email_settings,
                 api_key=api_key,
                 detail="An error occurred during glossary matching. Please try again.",
+                client=client,
             )
             return
 
@@ -343,6 +359,7 @@ async def _process_inbound(
                 email_settings=email_settings,
                 api_key=api_key,
                 detail="No glossary entries matched your text. Check the source language and glossary.",
+                client=client,
             )
             return
 
@@ -354,6 +371,7 @@ async def _process_inbound(
                 message_id=message_id,
                 from_address=email_settings.from_address,
                 api_key=api_key,
+                client=client,
             )
         except Exception:
             logger.exception("Failed to send match-glossary reply to {}", sender)
@@ -370,6 +388,7 @@ async def _process_inbound(
             email_settings=email_settings,
             api_key=api_key,
             detail="An error occurred during processing. Please try again.",
+            client=client,
         )
         return
 
@@ -381,6 +400,7 @@ async def _process_inbound(
             email_settings=email_settings,
             api_key=api_key,
             detail="No output was produced. Check your input and try again.",
+            client=client,
         )
         return
 
@@ -394,6 +414,7 @@ async def _process_inbound(
             message_id=message_id,
             from_address=email_settings.from_address,
             api_key=api_key,
+            client=client,
         )
     except Exception:
         logger.exception("Failed to send result reply to {}", sender)
@@ -407,6 +428,7 @@ async def _send_error_reply(
     email_settings,
     api_key: str,
     detail: str,
+    client: httpx.AsyncClient | None = None,
 ) -> None:
     """Send an error message as a threaded reply and suppress failures.
 
@@ -418,6 +440,9 @@ async def _send_error_reply(
             ``from_address``.
         api_key: Resend API key.
         detail: Error message text to send.
+        client: Optional shared HTTP client reused for the reply request.
+            When None, ``send_reply`` creates and closes its own
+            short-lived client.
     """
     try:
         await send_reply(
@@ -427,6 +452,7 @@ async def _send_error_reply(
             message_id=message_id,
             from_address=email_settings.from_address,
             api_key=api_key,
+            client=client,
         )
     except Exception:
         logger.exception("Failed to send error reply to {}", sender)
@@ -436,17 +462,24 @@ async def serve(cfg: Settings) -> None:
     """Start the email webhook HTTP server and block indefinitely.
 
     Registers the ``/webhook/email`` route on an aiohttp Application,
-    starts the TCP site, and waits on a never-ending event.
+    starts the TCP site, and waits on a never-ending event. A single
+    shared httpx.AsyncClient is created for the server's lifetime, stored
+    on the application (``app["http_client"]``), and reused across the
+    whole Resend request chain (content fetch, attachment download,
+    reply sending). The client is closed on shutdown; a failure to close
+    it is logged but never crashes the server.
 
     Args:
         cfg: Server configuration (Settings object).
     """
     email_cfg = cfg.email
+    http_client = create_client()
     app = web.Application()
     app["cfg"] = cfg
+    app["http_client"] = http_client
     app.router.add_post(
         "/webhook/email",
-        lambda req: _handle_webhook(req, req.app["cfg"]),
+        lambda req: _handle_webhook(req, req.app["cfg"], req.app["http_client"]),
     )
 
     runner = web.AppRunner(app)
@@ -464,3 +497,9 @@ async def serve(cfg: Settings) -> None:
         await asyncio.Event().wait()
     finally:
         await runner.cleanup()
+        try:
+            await http_client.aclose()
+        except Exception as e:
+            logger.warning(f"Failed to close shared HTTP client: {e}")
+        else:
+            logger.debug("Closed shared HTTP client")

@@ -11,6 +11,12 @@ from typing import Any, Literal
 import httpx
 
 from src.config import CostSettings, Settings, logger
+from src.http_client import (
+    LLM_TIMEOUT,
+    RetryExhaustedError,
+    create_client,
+    fetch_with_retry,
+)
 
 
 class _RateLimitError(Exception):
@@ -57,7 +63,11 @@ class LLM:
         self._client_lock = asyncio.Lock()
 
     def _get_http_client(self) -> httpx.AsyncClient:
-        """Create and return an async HTTP client.
+        """Create the authenticated HTTP client via the shared factory.
+
+        Delegates client construction to
+        :func:`src.http_client.create_client`, passing the API key as a
+        Bearer token and the LLM request timeout.
 
         Returns:
             Configured httpx.AsyncClient instance.
@@ -67,11 +77,29 @@ class LLM:
         """
         if not self.api_key:
             raise ValueError("Set the OPENROUTER_API_KEY environment variable.")
-        return httpx.AsyncClient(
+        return create_client(
             base_url=self.base_url,
             headers={"Authorization": f"Bearer {self.api_key}"},
-            timeout=600,
+            timeout=LLM_TIMEOUT,
         )
+
+    async def close(self) -> None:
+        """Close the underlying HTTP client, releasing the connection pool.
+
+        Idempotent: calling this method when no client exists (or after it
+        was already closed) is a no-op. Exceptions raised while closing are
+        logged as warnings and do not propagate.
+
+        Returns:
+            None.
+        """
+        if self._client is not None:
+            try:
+                await self._client.aclose()
+            except Exception as e:
+                logger.warning(f"Failed to close LLM HTTP client: {e}")
+            self._client = None
+            logger.debug("Closed LLM HTTP client")
 
     async def get_reply_async(
         self,
@@ -99,9 +127,6 @@ class LLM:
         if not self._client:
             async with self._client_lock:
                 if not self._client:
-                    # TODO: the AsyncClient is never closed — add an async
-                    # close() hook and call it from main() / the email
-                    # pipeline to release the connection pool.
                     self._client = self._get_http_client()
 
         max_retries = 5
@@ -215,16 +240,22 @@ async def fetch_cost(
     completion_id: str,
     api_key: str,
     cost_settings: CostSettings,
+    client: httpx.AsyncClient | None = None,
 ) -> float | None:
     """Fetch the generation cost for a completion from the API.
 
     Queries the configured generation info URL, extracts the cost value using
-    the key specified in *cost_settings*, and returns it as a float.
+    the key specified in *cost_settings*, and returns it as a float. The
+    request is retried with exponential backoff (up to 5 attempts) on
+    transient failures via :func:`src.http_client.fetch_with_retry`.
 
     Args:
         completion_id: The completion ID returned by the LLM.
         api_key: API key for authentication (passed as Bearer token).
         cost_settings: Configuration with the info URL and cost key.
+        client: Optional injected httpx.AsyncClient that is NOT closed by
+            this function. When None, a short-lived client is created and
+            closed before returning.
 
     Returns:
         The cost as a float, or None if the fetch failed, the key was missing,
@@ -236,29 +267,29 @@ async def fetch_cost(
     headers: dict[str, str] = {"User-Agent": "curl/8.0", "Accept": "application/json"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
-    max_retries = 5
-    last_error: Exception | None = None
-    for attempt in range(max_retries):
-        try:
-            async with httpx.AsyncClient(timeout=30) as client:
-                response = await client.get(url, headers=headers)
-                response.raise_for_status()
-                data = response.json()
-            break
-        except Exception as e:
-            last_error = e
-            if attempt < max_retries - 1:
-                logger.warning(
-                    f"Cost fetch attempt {attempt + 1}/{max_retries} failed for "
-                    f"completion {completion_id}: {type(e).__name__}: {e}"
-                )
-                await asyncio.sleep(3)
-    else:
+    own_client = client is None
+    if own_client:
+        client = create_client(timeout=30)
+    try:
+        response = await fetch_with_retry(
+            "GET", url, client=client, headers=headers, timeout=30
+        )
+        data = response.json()
+    except RetryExhaustedError as e:
         logger.warning(
-            f"Failed to fetch cost for completion {completion_id} after "
-            f"{max_retries} retries: {type(last_error).__name__}: {last_error}"
+            f"Failed to fetch cost for completion {completion_id} after 5 retries: "
+            f"{type(e).__name__}: {e}"
         )
         return None
+    except Exception as e:
+        logger.warning(
+            f"Failed to fetch cost for completion {completion_id}: "
+            f"{type(e).__name__}: {e}"
+        )
+        return None
+    finally:
+        if own_client:
+            await client.aclose()
 
     value = _find_key(data, cost_settings.cost_key)
     if value is None:
@@ -280,6 +311,7 @@ async def resolve_and_log_cost(
     completion_ids: list[str],
     api_key: str,
     cfg: Settings,
+    client: httpx.AsyncClient | None = None,
 ) -> tuple[float | None, str, int]:
     """Fetch and log the total cost of all LLM completions.
 
@@ -290,6 +322,8 @@ async def resolve_and_log_cost(
         completion_ids: List of LLM completion IDs to query cost for.
         api_key: API key for authentication.
         cfg: Application settings containing cost configuration.
+        client: Optional injected httpx.AsyncClient forwarded to each
+            :func:`fetch_cost` call; not closed by this function.
 
     Returns:
         A tuple of (total_cost_or_None, currency, unknown_count), where
@@ -302,7 +336,9 @@ async def resolve_and_log_cost(
     if not completion_ids:
         return None, cfg.cost.cost_currency, 0
 
-    cost_tasks = [fetch_cost(cid, api_key, cfg.cost) for cid in completion_ids]
+    cost_tasks = [
+        fetch_cost(cid, api_key, cfg.cost, client=client) for cid in completion_ids
+    ]
     cost_results = await asyncio.gather(*cost_tasks, return_exceptions=True)
 
     known_costs: list[float] = []

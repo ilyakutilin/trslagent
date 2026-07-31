@@ -1,5 +1,7 @@
 """Translation pipeline orchestration."""
 
+import httpx
+
 from src.config import Settings, logger
 from src.llm import LLM, resolve_and_log_cost
 from src.pipeline.concurrency import gather_chunk_results
@@ -42,6 +44,7 @@ async def run_translation_pipeline(
     ctx: GlossaryContext,
     cfg: Settings,
     llm: LLM | None,
+    http_client: httpx.AsyncClient | None = None,
 ) -> PipelineResult | None:
     """Run the translation pipeline over a single source text.
 
@@ -52,6 +55,8 @@ async def run_translation_pipeline(
         ctx: Prepared glossary context.
         cfg: Application settings.
         llm: LLM instance, or None for print-prompt-only mode.
+        http_client: Optional injected HTTP client used for cost fetches;
+            when None, resolve_and_log_cost falls back to creating its own.
 
     Returns:
         A PipelineResult with the stitched translation and metadata, or None
@@ -102,7 +107,7 @@ async def run_translation_pipeline(
     logger.info(f"Translation complete: {len(text)} -> {len(result)} characters")
 
     cost_total, _, cost_unknowns = await resolve_and_log_cost(
-        completion_ids, llm.api_key, cfg
+        completion_ids, llm.api_key, cfg, client=http_client
     )
 
     return build_pipeline_result(

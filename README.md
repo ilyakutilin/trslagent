@@ -29,6 +29,7 @@ src/
 ├── config.py                 # configuration system (pydantic-settings)
 ├── main.py                   # pipeline orchestrator
 ├── llm.py                    # OpenRouter API wrapper (5-retry backoff)
+├── http_client.py           # shared httpx client factory + retry helper
 ├── translator.py             # per-chunk translation prompt builder
 ├── reviewer.py               # full-text review/proofread (no chunking)
 ├── splitter.py               # text → chunks → stitch
@@ -374,7 +375,7 @@ In email mode, attach `ref_source.txt` and/or `ref_target.txt` alongside the oth
 
 ## LLM
 
-Uses the OpenRouter API (OpenAI-compatible endpoint). 5 retries with exponential backoff for timeouts, rate limits, and connection errors. Other errors raise immediately.
+Uses the OpenRouter API (OpenAI-compatible endpoint). 5 retries with exponential backoff for timeouts, rate limits, and connection errors. Other errors raise immediately. HTTP client construction and request retry logic are centralized in `src/http_client.py`.
 
 System prompt structure for translation:
 

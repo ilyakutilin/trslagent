@@ -238,7 +238,7 @@ class TestHandleWebhook:
             body=body,
         )
         cfg = _make_cfg({"resend_webhook_secret": WSEC})
-        resp = await _handle_webhook(req, cfg)  # type: ignore[arg-type]
+        resp = await _handle_webhook(req, cfg, MagicMock())  # type: ignore[arg-type]
         assert resp.status == 401
 
     async def test_returns_401_when_svix_headers_absent(self):
@@ -246,7 +246,7 @@ class TestHandleWebhook:
         body = json.dumps(payload).encode()
         req = FakeRequest(headers={}, body=body)
         cfg = _make_cfg({"resend_webhook_secret": WSEC})
-        resp = await _handle_webhook(req, cfg)  # type: ignore[arg-type]
+        resp = await _handle_webhook(req, cfg, MagicMock())  # type: ignore[arg-type]
         assert resp.status == 401
 
     async def test_returns_200_when_no_secret_configured(self):
@@ -257,7 +257,7 @@ class TestHandleWebhook:
         with patch(
             "src.email_server._process_inbound", new_callable=AsyncMock
         ) as mock_proc:
-            resp = await _handle_webhook(req, cfg)  # type: ignore[arg-type]
+            resp = await _handle_webhook(req, cfg, MagicMock())  # type: ignore[arg-type]
             assert resp.status == 200
             await asyncio.sleep(0)
             mock_proc.assert_called_once()
@@ -267,7 +267,7 @@ class TestHandleWebhook:
         headers = _make_svix_headers(body)
         req = FakeRequest(headers=headers, body=body)
         cfg = _make_cfg({"resend_webhook_secret": WSEC})
-        resp = await _handle_webhook(req, cfg)  # type: ignore[arg-type]
+        resp = await _handle_webhook(req, cfg, MagicMock())  # type: ignore[arg-type]
         assert resp.status == 400
 
     async def test_returns_200_for_non_email_received_event(self):
@@ -276,7 +276,7 @@ class TestHandleWebhook:
         headers = _make_svix_headers(body)
         req = FakeRequest(headers=headers, body=body)
         cfg = _make_cfg({"resend_webhook_secret": WSEC})
-        resp = await _handle_webhook(req, cfg)  # type: ignore[arg-type]
+        resp = await _handle_webhook(req, cfg, MagicMock())  # type: ignore[arg-type]
         assert resp.status == 200
         assert resp.text is not None
         assert "Ignored" in resp.text
@@ -287,7 +287,7 @@ class TestHandleWebhook:
         headers = _make_svix_headers(body)
         req = FakeRequest(headers=headers, body=body)
         cfg = _make_cfg({"resend_webhook_secret": WSEC})
-        resp = await _handle_webhook(req, cfg)  # type: ignore[arg-type]
+        resp = await _handle_webhook(req, cfg, MagicMock())  # type: ignore[arg-type]
         assert resp.status == 200
         assert resp.text is not None
         assert "Missing email_id" in resp.text
@@ -310,7 +310,7 @@ class TestHandleWebhook:
                 "allowed_recipient": "trsl@mydomain.com",
             }
         )
-        resp = await _handle_webhook(req, cfg)  # type: ignore[arg-type]
+        resp = await _handle_webhook(req, cfg, MagicMock())  # type: ignore[arg-type]
         assert resp.status == 200
         assert resp.text is not None
         assert "Ignored" in resp.text
@@ -330,7 +330,7 @@ class TestHandleWebhook:
         with patch(
             "src.email_server._process_inbound", new_callable=AsyncMock
         ) as mock_proc:
-            resp = await _handle_webhook(req, cfg)  # type: ignore[arg-type]
+            resp = await _handle_webhook(req, cfg, MagicMock())  # type: ignore[arg-type]
             assert resp.status == 200
             assert resp.text is not None
             assert "OK" in resp.text
@@ -354,7 +354,7 @@ class TestHandleWebhook:
         with patch(
             "src.email_server._process_inbound", new_callable=AsyncMock
         ) as mock_proc:
-            resp = await _handle_webhook(req, cfg)  # type: ignore[arg-type]
+            resp = await _handle_webhook(req, cfg, MagicMock())  # type: ignore[arg-type]
             assert resp.status == 200
             await asyncio.sleep(0)
             mock_proc.assert_called_once()
@@ -608,7 +608,7 @@ class TestProcessInbound:
     async def test_continues_after_download_exception_for_one_attachment(self, mocker):
         call_count = 0
 
-        async def dl_side_effect(url):
+        async def dl_side_effect(url, client=None):
             nonlocal call_count
             call_count += 1
             if "bad" in url:
@@ -683,6 +683,34 @@ class TestServe:
         mock_site.assert_called_once_with(mocker.ANY, "127.0.0.1", 9999)
         site_instance.start.assert_called_once()
 
+    async def test_closes_shared_http_client_on_shutdown(self, mocker):
+        mock_app = mocker.MagicMock()
+        mocker.patch("src.email_server.web.Application", return_value=mock_app)
+        mock_runner = mocker.patch("aiohttp.web.AppRunner", autospec=True)
+        mock_site = mocker.patch("aiohttp.web.TCPSite", autospec=True)
+        runner_instance = mock_runner.return_value
+        runner_instance.setup = AsyncMock()
+        runner_instance.cleanup = AsyncMock()
+        site_instance = mock_site.return_value
+        site_instance.start = AsyncMock()
+
+        mock_client = AsyncMock()
+        mock_create = mocker.patch(
+            "src.email_server.create_client", return_value=mock_client
+        )
+
+        event_mock = mocker.patch("asyncio.Event")
+        event_instance = event_mock.return_value
+        event_instance.wait = AsyncMock(side_effect=KeyboardInterrupt)
+
+        cfg = _make_cfg({"listen_host": "127.0.0.1", "listen_port": 9999})
+        with pytest.raises(KeyboardInterrupt):
+            await serve(cfg)
+
+        mock_create.assert_called_once_with()
+        mock_client.aclose.assert_awaited_once()
+        runner_instance.cleanup.assert_called_once()
+
 
 class TestSendErrorReply:
     async def test_calls_send_reply_with_correct_params(self, mocker):
@@ -697,6 +725,7 @@ class TestSendErrorReply:
             email_settings=mock_email_settings,
             api_key="key",
             detail="Something went wrong",
+            client=mocker.MagicMock(),
         )
 
         mock_reply.assert_called_once()
@@ -723,6 +752,7 @@ class TestSendErrorReply:
             email_settings=mock_email_settings,
             api_key="key",
             detail="Something went wrong",
+            client=mocker.MagicMock(),
         )
 
 

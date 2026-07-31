@@ -6,67 +6,115 @@ and constructing Settings objects from email attachments and body text.
 
 import tempfile
 import tomllib
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
 from loguru import logger
 
 from src.config import Settings, get_settings
+from src.http_client import create_client
 
 MAX_INDIVIDUAL_ATTACHMENT = 10 * 1024 * 1024  # 10 MB
 RESEND_API_BASE = "https://api.resend.com"
 RESEND_EMAILS_RECEIVING_BASE = f"{RESEND_API_BASE}/emails/receiving"
 
 
-async def fetch_email_content(email_id: str, api_key: str) -> dict:
+@asynccontextmanager
+async def _resolve_client(
+    client: httpx.AsyncClient | None,
+    *,
+    timeout: float,
+) -> AsyncIterator[httpx.AsyncClient]:
+    """Yield an injected client or a short-lived owned one.
+
+    When *client* is None, a client is created via ``create_client`` with
+    the given *timeout* and closed when the context exits. An injected
+    client is yielded as-is and is never closed by this helper.
+
+    Args:
+        client: Optional pre-configured client injected by the caller.
+        timeout: Timeout in seconds used for the owned client.
+
+    Yields:
+        The httpx.AsyncClient to use for requests.
+    """
+    if client is None:
+        async with create_client(timeout=timeout) as owned:
+            yield owned
+    else:
+        yield client
+
+
+async def fetch_email_content(
+    email_id: str,
+    api_key: str,
+    *,
+    client: httpx.AsyncClient | None = None,
+) -> dict:
     """Retrieve the raw email content from the Resend Receiving API.
 
     Args:
         email_id: The Resend email ID to fetch.
         api_key: Resend API key for authentication.
+        client: Optional pre-configured client to reuse; it is not closed
+            by this function. When None, a short-lived client is created
+            via ``create_client`` and closed automatically.
 
     Returns:
         The full email JSON payload, including text, html, and headers.
     """
-    async with httpx.AsyncClient() as client:
+    async with _resolve_client(client, timeout=30) as client:
         resp = await client.get(
             f"{RESEND_EMAILS_RECEIVING_BASE}/{email_id}",
             headers={"Authorization": f"Bearer {api_key}"},
-            timeout=30,
         )
         resp.raise_for_status()
         return resp.json()
 
 
-async def fetch_attachments(email_id: str, api_key: str) -> list[dict]:
+async def fetch_attachments(
+    email_id: str,
+    api_key: str,
+    *,
+    client: httpx.AsyncClient | None = None,
+) -> list[dict]:
     """List all attachments for a received email via the Resend API.
 
     Args:
         email_id: The Resend email ID.
         api_key: Resend API key for authentication.
+        client: Optional pre-configured client to reuse; it is not closed
+            by this function. When None, a short-lived client is created
+            via ``create_client`` and closed automatically.
 
     Returns:
         A list of attachment metadata dicts (filename, download_url, etc.).
         Returns an empty list if no attachments are found.
     """
-    async with httpx.AsyncClient() as client:
+    async with _resolve_client(client, timeout=30) as client:
         resp = await client.get(
             f"{RESEND_EMAILS_RECEIVING_BASE}/{email_id}/attachments",
-            headers={
-                "Authorization": f"Bearer {api_key}",
-            },
-            timeout=30,
+            headers={"Authorization": f"Bearer {api_key}"},
         )
         resp.raise_for_status()
         return resp.json().get("data", [])
 
 
-async def download_attachment(download_url: str) -> bytes:
+async def download_attachment(
+    download_url: str,
+    *,
+    client: httpx.AsyncClient | None = None,
+) -> bytes:
     """Download a single attachment from its temporary download URL.
 
     Args:
         download_url: The temporary URL provided by the Resend API
             for downloading the attachment content.
+        client: Optional pre-configured client to reuse; it is not closed
+            by this function. When None, a short-lived client is created
+            via ``create_client`` and closed automatically.
 
     Returns:
         The raw bytes of the attachment.
@@ -76,7 +124,7 @@ async def download_attachment(download_url: str) -> bytes:
             (10 MB).
         httpx.HTTPStatusError: If the download request fails.
     """
-    async with httpx.AsyncClient(timeout=60) as client:
+    async with _resolve_client(client, timeout=60) as client:
         resp = await client.get(download_url)
         resp.raise_for_status()
         content = resp.content
@@ -96,6 +144,7 @@ async def send_reply(
     message_id: str,
     from_address: str,
     api_key: str,
+    client: httpx.AsyncClient | None = None,
 ) -> None:
     """Send a threaded reply email via the Resend send API.
 
@@ -109,11 +158,14 @@ async def send_reply(
         message_id: The Message-ID of the original email for threading.
         from_address: Sender email address.
         api_key: Resend API key for authentication.
+        client: Optional pre-configured client to reuse; it is not closed
+            by this function. When None, a short-lived client is created
+            via ``create_client`` and closed automatically.
     """
     if not subject.lower().startswith("re:"):
         subject = f"Re: {subject}"
 
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with _resolve_client(client, timeout=30) as client:
         resp = await client.post(
             f"{RESEND_API_BASE}/emails",
             headers={

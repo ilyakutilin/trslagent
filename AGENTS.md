@@ -37,9 +37,9 @@
 ## LLM
 
 - Uses OpenRouter or any OpenAI-compatible API. Default base URL: `https://openrouter.ai/api/v1`.
-- The LLM client (`src/llm.py`) makes **direct async httpx calls** — there is NO OpenAI SDK dependency. `POST {base_url}/chat/completions` with `Authorization: Bearer <key>`, `model`/`messages`/`temperature` (+ optional `reasoning_effort`) in the JSON body; the response is parsed manually (`choices[0].message.content`, `id`). `reasoning_effort` is typed as `Literal["none", "minimal", "low", "medium", "high", "xhigh"] | None` in `src/config.py`.
+- The LLM client (`src/llm.py`) makes **direct async httpx calls** — there is NO OpenAI SDK dependency. `POST {base_url}/chat/completions` with `Authorization: Bearer <key>`, `model`/`messages`/`temperature` (+ optional `reasoning_effort`) in the JSON body; the response is parsed manually (`choices[0].message.content`, `id`). `reasoning_effort` is typed as `Literal["none", "minimal", "low", "medium", "high", "xhigh"] | None` in `src/config.py`. Client construction is centralized in `src/http_client.py` (`create_client`); the LLM's own client is built by the factory (600s timeout), kept per-`main()` run, and closed via `LLM.close()` which `main()` calls in a `finally` block.
 - 5 retries with exponential backoff (1/2/4/8s) for timeout / HTTP 429 / `httpx.TransportError` (timeout branch is caught first — `httpx.TimeoutException` is a `TransportError` subclass). Other errors raise immediately as `RuntimeError("Translation failed: ...")`.
-- **Proxy sensitivity (important for future proxy work)**: every `httpx.AsyncClient` in the project (`src/llm.py`, `src/email_processor.py`) honors proxy env vars (`ALL_PROXY`, `HTTPS_PROXY`, etc.) via httpx's default `trust_env=True`. If a SOCKS proxy var is set (e.g. `ALL_PROXY=socks5h://...`) but `socksio` is not installed, `httpx.AsyncClient.__init__` raises `ImportError` **before any request is sent** — this historically broke tests opaquely (respx "route not called" / raw ImportError). When adding proxy functionality, decide explicitly: `trust_env` / explicit proxy args on the clients, `socksio` as a dependency, and don't rely on the test fixture below for proxy-specific tests.
+- **Proxy sensitivity (important for future proxy work)**: ALL `httpx.AsyncClient` construction is centralized in `src/http_client.py:create_client`, which leaves `trust_env=True` by default, so proxy env vars (`ALL_PROXY`, `HTTPS_PROXY`, etc.) are honored everywhere automatically. If a SOCKS proxy var is set (e.g. `ALL_PROXY=socks5h://...`) but `socksio` is not installed, `httpx.AsyncClient.__init__` raises `ImportError` **before any request is sent** — this historically broke tests opaquely (respx "route not called" / raw ImportError). When adding proxy functionality, decide explicitly: `trust_env` / explicit proxy args on the clients, `socksio` as a dependency, and don't rely on the test fixture below for proxy-specific tests.
 - `--print-prompt-only` / `print_prompt_only: true` skips LLM calls and prints the constructed prompts to stdout.
 
 ## Review Mode
@@ -52,6 +52,7 @@
 ## Email Server (Webhook)
 
 - Started via `python src/cli.py serve-emails <config.toml>`.
+- **Shared HTTP client**: `serve()` creates one shared `httpx.AsyncClient` for the whole server lifetime (stored as `app["http_client"]`, threaded through `_handle_webhook`/`_process_inbound` into the `src/email_processor.py` functions) and closes it in `serve()`'s `finally` (close failures only log warnings). The email_processor functions accept an optional injected `client` param and otherwise create a short-lived self-closing client via `create_client`.
 - Runs an `aiohttp` HTTP server on `email.listen_host`:`email.listen_port` (default `0.0.0.0:8025`).
 - Listens on `POST /webhook/email` for Resend inbound email webhooks.
 - Uses `src/email_server.py` (server) + `src/email_processor.py` (Resend API client).
